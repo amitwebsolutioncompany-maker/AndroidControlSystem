@@ -8,8 +8,8 @@ let mainWindow;
 
 function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 1400,
-        height: 900,
+        width: 1500,
+        height: 950,
         webPreferences: {
             preload: path.join(__dirname, "preload.js"),
             contextIsolation: true,
@@ -41,6 +41,7 @@ app.on("activate", () => {
 
 // IPC Handlers
 
+// Device Connection Handlers
 ipcMain.handle("connect-wifi", async (event, ip) => {
     return await adb.connectWifi(ip);
 });
@@ -49,14 +50,15 @@ ipcMain.handle("check-usb", async () => {
     return await adb.checkUsb();
 });
 
-ipcMain.handle("cleanup-device", async () => {
-    return await adb.cleanupDevice();
+ipcMain.handle("get-devices-details", async () => {
+    return await adb.getConnectedDevicesWithDetails();
 });
 
-ipcMain.handle("install-apk", async (event, apkPath) => {
-    let targetPath = apkPath;
+// --- Bulk Operations Handlers ---
 
-    // If no path was passed, or if the passed path doesn't exist, open a file chooser dialog
+// Bulk APK Installer (runs in parallel)
+ipcMain.handle("bulk-install", async (event, { deviceIds, apkPath }) => {
+    let targetPath = apkPath;
     if (!targetPath || !fs.existsSync(targetPath)) {
         const res = await dialog.showOpenDialog(mainWindow, {
             title: "Select Signage APK to Install",
@@ -71,30 +73,148 @@ ipcMain.handle("install-apk", async (event, apkPath) => {
         }
         targetPath = res.filePaths[0];
     }
-    return await adb.installApk(targetPath);
+
+    const results = await Promise.all(
+        deviceIds.map(async (id) => {
+            try {
+                const r = await adb.installApkOnDevice(id, targetPath);
+                return { deviceId: id, success: r.success, message: r.message || r.error };
+            } catch (e) {
+                return { deviceId: id, success: false, error: String(e) };
+            }
+        })
+    );
+    return { success: true, results, apkPath: targetPath };
 });
 
-ipcMain.handle("rotate-screen", async (event, mode) => {
-    return await adb.rotateScreen(mode);
-});
-
-ipcMain.handle("reboot-device", async () => {
-    return await adb.rebootDevice();
-});
-
-ipcMain.handle("get-devices", async () => {
-    return await adb.getConnectedDevices();
-});
-
-ipcMain.handle("open-multi-files", async () => {
+// Bulk File Transfer (runs in parallel)
+ipcMain.handle("bulk-push", async (event, { deviceIds, dest }) => {
     const res = await dialog.showOpenDialog(mainWindow, {
-        title: "Select Files to Send to Device",
+        title: "Select Files to Send to Devices",
         properties: ["openFile", "multiSelections"]
     });
-    if (res.canceled) return [];
-    return res.filePaths;
+    if (res.canceled || res.filePaths.length === 0) {
+        return { success: false, error: "No files selected." };
+    }
+    const filePaths = res.filePaths;
+
+    const results = await Promise.all(
+        deviceIds.map(async (id) => {
+            try {
+                const r = await adb.pushFilesToDevice(id, filePaths, dest);
+                return { deviceId: id, success: r.success, results: r.results, error: r.error };
+            } catch (e) {
+                return { deviceId: id, success: false, error: String(e) };
+            }
+        })
+    );
+    return { success: true, results, fileCount: filePaths.length };
 });
 
-ipcMain.handle("push-files", async (event, { paths, dest }) => {
-    return await adb.pushFiles(paths, dest);
+// Bulk Device Cleanup & Optimizations (runs in parallel)
+ipcMain.handle("bulk-cleanup", async (event, { deviceIds }) => {
+    const results = await Promise.all(
+        deviceIds.map(async (id) => {
+            try {
+                const r = await adb.cleanupDevice(id);
+                return { deviceId: id, success: r.success, results: r.results, error: r.error };
+            } catch (e) {
+                return { deviceId: id, success: false, error: String(e) };
+            }
+        })
+    );
+    return { success: true, results };
+});
+
+// Bulk Screen Rotation (runs in parallel)
+ipcMain.handle("bulk-rotate", async (event, { deviceIds, mode }) => {
+    const results = await Promise.all(
+        deviceIds.map(async (id) => {
+            try {
+                const r = await adb.rotateScreenOnDevice(id, mode);
+                return { deviceId: id, success: r.success, message: r.message || r.error };
+            } catch (e) {
+                return { deviceId: id, success: false, error: String(e) };
+            }
+        })
+    );
+    return { success: true, results };
+});
+
+// Bulk Device Reboot (runs in parallel)
+ipcMain.handle("bulk-reboot", async (event, { deviceIds }) => {
+    const results = await Promise.all(
+        deviceIds.map(async (id) => {
+            try {
+                const r = await adb.rebootDevice(id);
+                return { deviceId: id, success: r.success, message: r.message || r.error };
+            } catch (e) {
+                return { deviceId: id, success: false, error: String(e) };
+            }
+        })
+    );
+    return { success: true, results };
+});
+
+// --- Device File Manager Handlers ---
+
+// List files/folders on target device
+ipcMain.handle("file-manager-list", async (event, { deviceId, path }) => {
+    return await adb.listFiles(deviceId, path);
+});
+
+// Delete file/folder on target device
+ipcMain.handle("file-manager-delete", async (event, { deviceId, path, isDir }) => {
+    return await adb.deletePath(deviceId, path, isDir);
+});
+
+// Rename file/folder on target device
+ipcMain.handle("file-manager-rename", async (event, { deviceId, oldPath, newPath }) => {
+    return await adb.renamePath(deviceId, oldPath, newPath);
+});
+
+// Create directory on target device
+ipcMain.handle("file-manager-mkdir", async (event, { deviceId, path }) => {
+    return await adb.createFolder(deviceId, path);
+});
+
+// Pull (download) file from TV to PC
+ipcMain.handle("file-manager-download", async (event, { deviceId, remotePath }) => {
+    const filename = path.basename(remotePath);
+    const res = await dialog.showSaveDialog(mainWindow, {
+        title: "Download File from TV",
+        defaultPath: filename
+    });
+    if (res.canceled || !res.filePath) {
+        return { success: false, error: "Download cancelled." };
+    }
+    return await adb.pullFile(deviceId, remotePath, res.filePath);
+});
+
+// Push (upload) file from PC to TV
+ipcMain.handle("file-manager-upload", async (event, { deviceId, remoteFolder }) => {
+    const res = await dialog.showOpenDialog(mainWindow, {
+        title: "Select File to Upload to TV",
+        properties: ["openFile"]
+    });
+    if (res.canceled || res.filePaths.length === 0) {
+        return { success: false, error: "Upload cancelled." };
+    }
+    const localPath = res.filePaths[0];
+    const filename = path.basename(localPath);
+    // Posix paths are used on Android file systems (slash separation)
+    const remoteDest = path.posix.join(remoteFolder, filename);
+    return await adb.pushFile(deviceId, localPath, remoteDest);
+});
+
+// --- Apps Manager Handlers ---
+
+// List installed activities/packages
+ipcMain.handle("apps-list", async (event, { deviceId }) => {
+    return await adb.listApps(deviceId);
+});
+
+// Uninstall package
+ipcMain.handle("apps-uninstall", async (event, { deviceId, packageName }) => {
+    return await adb.uninstallApp(deviceId, packageName);
 });

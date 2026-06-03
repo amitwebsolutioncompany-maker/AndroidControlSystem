@@ -4,182 +4,306 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Android Control Center</title>
+    <title>Android Control Center - Nextview</title>
 
     <link rel="stylesheet" href="./css/style.css">
-
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 
-<body>
+<body class="dark-mode">
 
     <header>
 
         <div class="logo-section">
-
             <div class="logo">
-                <i class="fa-solid fa-mobile-screen-button"></i>
+                <i class="fa-solid fa-server"></i>
             </div>
-
             <div>
                 <h1>Android Control System</h1>
-                <p>Nextview Technologies</p>
+                <p>Nextview Multi-TV Deployment Suite</p>
             </div>
-
         </div>
 
-        <div class="developer">
-            <span>Developed by</span>
-            <strong>Amit</strong>
+        <div class="header-controls">
+            <button class="theme-toggle-btn" id="themeToggleBtn" title="Toggle Light/Dark Theme">
+                <i class="fa-solid fa-sun" id="themeIcon"></i>
+            </button>
+            <div class="developer">
+                <span>Logged in as </span>
+                <strong>Amit</strong>
+            </div>
         </div>
 
     </header>
 
-    <main>
+    <div class="dashboard-container">
 
-        <section class="card connection-card">
+        <!-- LEFT SIDEBAR: Device Discovery & Connection -->
+        <aside class="sidebar">
 
-            <div class="card-header">
-
-                <div class="title-group">
-
-                    <div class="icon-box">
-                        <i class="fa-solid fa-mobile-screen"></i>
-                    </div>
-
-                    <div>
-                        <h2>Device Connection</h2>
-                        <p>Connect your Android device</p>
-                    </div>
-
-                </div>
-
-                <div class="status disconnected" id="statusBadge">
-                    Disconnected
-                </div>
-
-            </div>
-
-            <div class="connection-grid">
-
-                <div>
-
-                    <label>Device IP (Wi-Fi Connection)</label>
-
-                    <div class="input-group">
-
+            <div>
+                <div class="sidebar-title">Connect TV</div>
+                <div class="connection-panel">
+                    <label class="input-label">Wi-Fi Connection (Device IP)</label>
+                    <div class="ip-connect-group">
                         <input type="text" id="ipInput" placeholder="192.168.1.6">
-
-                        <button class="connect-btn" id="connectBtn">
+                        <button class="btn btn-primary" id="connectBtn" title="Connect over Wi-Fi">
                             <i class="fa-solid fa-wifi"></i>
-                            Connect
                         </button>
+                    </div>
+                    <button class="btn btn-secondary usb-scan-btn" id="usbBtn">
+                        <i class="fa-solid fa-usb"></i> Scan USB Devices
+                    </button>
+                </div>
+            </div>
 
+            <div class="device-discovery-panel">
+                <div class="discovery-header">
+                    <div class="sidebar-title">Target Devices</div>
+                    <button class="btn btn-secondary discovery-small-btn" id="refreshDevicesBtn" title="Refresh Devices List">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>
+                </div>
+                
+                <div class="discovery-actions" style="margin-bottom: 10px;">
+                    <button class="btn btn-secondary discovery-small-btn btn-fill" id="selectAllBtn">Select All</button>
+                    <button class="btn btn-secondary discovery-small-btn btn-fill" id="unselectAllBtn">Clear All</button>
+                </div>
+
+                <div class="devices-checklist-container" id="devicesChecklist">
+                    <!-- Dynamic devices checklist injected here -->
+                    <div style="text-align: center; color: var(--text-muted); font-size: 12px; margin-top: 20px;">
+                        Scanning connected TVs...
+                    </div>
+                </div>
+            </div>
+
+        </aside>
+
+        <!-- MAIN WINDOW: Content Panels -->
+        <main class="main-area">
+
+            <!-- Tab pills navigation -->
+            <div class="tabs-navigation">
+                <button class="tab-btn active" data-tab="bulk">
+                    <i class="fa-solid fa-layer-group"></i> Bulk Operations
+                </button>
+                <button class="tab-btn" data-tab="file">
+                    <i class="fa-solid fa-folder-open"></i> File Manager
+                </button>
+                <button class="tab-btn" data-tab="apps">
+                    <i class="fa-solid fa-cubes"></i> Installed Apps
+                </button>
+                <button class="tab-btn" data-tab="log">
+                    <i class="fa-solid fa-clock-rotate-left"></i> Deployment Log
+                </button>
+            </div>
+
+            <!-- Tabs Panels Content -->
+            <div class="tabs-content">
+
+                <!-- 1. BULK OPERATIONS TAB -->
+                <div class="tab-panel active" id="panel-bulk">
+
+                    <div class="grid-container">
+
+                        <div class="card">
+                            <div class="card-title">
+                                <i class="fa-solid fa-trash-can"></i> Step 1: Remove Bloatware
+                            </div>
+                            <div class="card-desc">Uninstall TV bloatware and auto-apply screen sleep/saver optimizations on all selected devices.</div>
+                            <div class="card-body">
+                                <button class="btn btn-danger" id="bulkCleanupBtn">
+                                    <i class="fa-solid fa-broom"></i> Clean Selected Devices
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-title">
+                                <i class="fa-solid fa-file-export"></i> Step 2: Signage Installer
+                            </div>
+                            <div class="card-desc">Select any Android signage APK package and deploy it simultaneously to all selected TVs.</div>
+                            <div class="card-body">
+                                <button class="btn btn-primary" id="bulkInstallBtn">
+                                    <i class="fa-solid fa-download"></i> Choose & Deploy APK
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-title">
+                                <i class="fa-solid fa-upload"></i> Step 3: Push Media Files
+                            </div>
+                            <div class="card-desc">Transfer videos, images, or assets to the selected TVs main memory storage directory.</div>
+                            <div class="card-body">
+                                <div class="form-group">
+                                    <label class="input-label">Destination Path on Device</label>
+                                    <input type="text" id="bulkDestPath" value="/sdcard/" placeholder="/sdcard/">
+                                </div>
+                                <button class="btn btn-success" id="bulkPushBtn">
+                                    <i class="fa-solid fa-paper-plane"></i> Choose & Send Files
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-title">
+                                <i class="fa-solid fa-gamepad"></i> Step 4: Device orientation
+                            </div>
+                            <div class="card-desc">Modify settings and control orientations across selected TV systems.</div>
+                            <div class="card-body">
+                                <label class="input-label">Orientation Control</label>
+                                <div class="rotation-grid" style="margin-bottom: 12px;">
+                                    <button class="btn btn-secondary bulk-rotate-btn" data-rotation="0">Portrait (0°)</button>
+                                    <button class="btn btn-secondary bulk-rotate-btn" data-rotation="1">Landscape (90°)</button>
+                                    <button class="btn btn-secondary bulk-rotate-btn" data-rotation="2">Rev Portrait (180°)</button>
+                                    <button class="btn btn-secondary bulk-rotate-btn" data-rotation="3">Rev Landscape (270°)</button>
+                                </div>
+                                <label class="input-label">Reboot Control</label>
+                                <button class="btn btn-danger" id="bulkRebootBtn">
+                                    <i class="fa-solid fa-power-off"></i> Reboot Selected Devices
+                                </button>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- Alert message box for logs -->
+                    <div class="alert-box" id="statusBox"></div>
+
+                </div>
+
+                <!-- 2. FILE MANAGER TAB -->
+                <div class="tab-panel" id="panel-file">
+                    
+                    <div class="file-manager-toolbar">
+                        <div class="file-manager-path-section">
+                            <select id="fileManagerDeviceSelect" class="device-dropdown">
+                                <option value="">-- Select Target Device --</option>
+                            </select>
+                            <button class="btn btn-secondary" id="fileManagerUpBtn" title="Go Up Directory" disabled>
+                                <i class="fa-solid fa-arrow-up"></i>
+                            </button>
+                            <input type="text" id="fileManagerPathInput" value="/sdcard/" placeholder="/sdcard/">
+                        </div>
+                        <div class="btn-row">
+                            <button class="btn btn-primary" id="fileManagerRefreshBtn" disabled>
+                                <i class="fa-solid fa-arrows-rotate"></i> Refresh
+                            </button>
+                            <button class="btn btn-secondary" id="fileManagerMkdirBtn" disabled>
+                                <i class="fa-solid fa-folder-plus"></i> New Folder
+                            </button>
+                            <button class="btn btn-success" id="fileManagerUploadBtn" disabled>
+                                <i class="fa-solid fa-cloud-arrow-up"></i> Upload
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="table-wrapper">
+                        <table id="fileManagerTable">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Type</th>
+                                    <th>Size</th>
+                                    <th>Modified</th>
+                                    <th style="width: 250px; text-align: right;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fileManagerBody">
+                                <tr>
+                                    <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                                        Select a connected TV device from the dropdown to browse its storage.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
 
                 </div>
 
-                <div>
+                <!-- 3. INSTALLED APPLICATIONS TAB -->
+                <div class="tab-panel" id="panel-apps">
+                    
+                    <div class="apps-manager-toolbar">
+                        <div class="search-app-group">
+                            <select id="appsDeviceSelect" class="device-dropdown">
+                                <option value="">-- Select Target Device --</option>
+                            </select>
+                            <input type="search" id="appsSearchInput" placeholder="Search application packages..." disabled>
+                        </div>
+                        <div class="btn-row">
+                            <button class="btn btn-primary" id="appsRefreshBtn" disabled>
+                                <i class="fa-solid fa-rotate-right"></i> Refresh
+                            </button>
+                            <button class="btn btn-danger" id="appsBulkUninstallBtn" disabled>
+                                <i class="fa-solid fa-trash-can"></i> Uninstall Selected
+                            </button>
+                        </div>
+                    </div>
 
-                    <label>USB Connection</label>
-
-                    <button class="usb-btn" id="usbBtn">
-                        <i class="fa-solid fa-mobile"></i>
-                        Check USB Device
-                    </button>
-
-                </div>
-
-            </div>
-
-            <div class="success-box" id="statusBox" style="display: none;">
-                Ready.
-            </div>
-
-        </section>
-
-        <div class="top-grid">
-
-            <section class="card">
-
-                <div class="section-title">
-                    <h3>Step 1: Remove Bloatware</h3>
-                    <p>Clean unnecessary applications from device</p>
-                </div>
-
-                <button class="danger-btn" id="cleanupBtn">
-                    Start Cleanup Process
-                </button>
-
-            </section>
-
-            <section class="card">
-
-                <div class="section-title">
-                    <h3>Step 2: Signage & Files</h3>
-                    <p>Deploy APK and manage device files</p>
-                </div>
-
-                <button class="install-btn" id="installCustomApkBtn">
-                    <i class="fa-solid fa-file-export"></i>
-                    Choose & Install APK
-                </button>
-
-                <button class="network-btn" id="sendFilesBtn">
-                    <i class="fa-solid fa-paper-plane"></i>
-                    Send Files to Device
-                </button>
-
-            </section>
-
-        </div>
-
-        <section class="card">
-
-            <div class="section-title">
-                <h3>Device Controls</h3>
-                <p>Manage device settings and orientation</p>
-            </div>
-
-            <div class="controls-grid">
-
-                <div>
-
-                    <h4>Screen Rotation</h4>
-
-                    <div class="rotation-grid">
-
-                        <button class="rotate-btn" data-rotation="0">Portrait</button>
-                        <button class="rotate-btn" data-rotation="1">Landscape</button>
-                        <button class="rotate-btn" data-rotation="2">Reverse Portrait</button>
-                        <button class="rotate-btn" data-rotation="3">Reverse Landscape</button>
-
+                    <div class="table-wrapper">
+                        <table id="appsTable">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px; text-align: center;"><input type="checkbox" id="appsSelectAllCheck" disabled></th>
+                                    <th>Application Name</th>
+                                    <th>Package Name</th>
+                                    <th style="width: 150px; text-align: right;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="appsBody">
+                                <tr>
+                                    <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                                        Select a connected TV device from the dropdown to list its applications.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
 
                 </div>
 
-                <div>
+                <!-- 4. DEPLOYMENT PROGRESS LOG TAB -->
+                <div class="tab-panel" id="panel-log">
 
-                    <h4>System Controls</h4>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <span style="font-size: 13px; color: var(--text-muted);">Deployment log history for this session</span>
+                        <button class="btn btn-secondary discovery-small-btn" id="clearLogsBtn">
+                            <i class="fa-solid fa-trash"></i> Clear Log Table
+                        </button>
+                    </div>
 
-                    <button class="reboot-btn" id="rebootBtn">
-                        Reboot Device
-                    </button>
+                    <div class="table-wrapper">
+                        <table id="logsTable">
+                            <thead>
+                                <tr>
+                                    <th style="width: 120px;">Time</th>
+                                    <th>Device ID/Name</th>
+                                    <th>Operation</th>
+                                    <th>Result/Status Details</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logsBody">
+                                <tr>
+                                    <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                                        No deployments performed yet. Trigger bulk actions to see status.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
 
                 </div>
 
             </div>
 
-        </section>
+        </main>
 
-    </main>
+    </div>
 
-    <footer>
-        © 2026 Nextview Technologies
-        <span>Version 1.0.0</span>
-    </footer>
-
-    <!-- Frontend controller script -->
+    <!-- Frontend controller logic scripts -->
     <script src="./js/app.js"></script>
 
 </body>

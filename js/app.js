@@ -1,300 +1,1012 @@
-// js/app.js - Frontend controller for Android Control Center
+// js/app.js - Multi-Device Control Center Frontend Logic
 
-// DOM Elements
-const statusBadge = document.getElementById("statusBadge");
+// --- GLOBALS & STATE ---
+let connectedDevices = [];
+let selectedDeviceIds = new Set();
+let currentPath = "/sdcard";
+let activeFileManagerDevice = "";
+let activeAppsDevice = "";
+let installedAppsList = [];
+let deploymentLogs = [];
+
+// --- DOM SELECTORS ---
+
+// Theme & Navigation
+const themeToggleBtn = document.getElementById("themeToggleBtn");
+const themeIcon = document.getElementById("themeIcon");
+const tabButtons = document.querySelectorAll(".tab-btn");
+const tabPanels = document.querySelectorAll(".tab-panel");
+
+// Connection Controls
 const ipInput = document.getElementById("ipInput");
 const connectBtn = document.getElementById("connectBtn");
 const usbBtn = document.getElementById("usbBtn");
-const statusBox = document.getElementById("statusBox");
-const cleanupBtn = document.getElementById("cleanupBtn");
-const installCustomApkBtn = document.getElementById("installCustomApkBtn");
-const sendFilesBtn = document.getElementById("sendFilesBtn");
-const rotationButtons = document.querySelectorAll(".rotate-btn");
-const rebootBtn = document.getElementById("rebootBtn");
 
-// Loading state helper
-const allInteractiveElements = [
-    ipInput,
-    connectBtn,
-    usbBtn,
-    cleanupBtn,
-    installCustomApkBtn,
-    sendFilesBtn,
-    rebootBtn,
-    ...rotationButtons
+// Sidebar Devices checklist
+const refreshDevicesBtn = document.getElementById("refreshDevicesBtn");
+const selectAllBtn = document.getElementById("selectAllBtn");
+const unselectAllBtn = document.getElementById("unselectAllBtn");
+const devicesChecklist = document.getElementById("devicesChecklist");
+
+// Bulk Operations Tab
+const bulkCleanupBtn = document.getElementById("bulkCleanupBtn");
+const bulkInstallBtn = document.getElementById("bulkInstallBtn");
+const bulkDestPath = document.getElementById("bulkDestPath");
+const bulkPushBtn = document.getElementById("bulkPushBtn");
+const bulkRotateButtons = document.querySelectorAll(".bulk-rotate-btn");
+const bulkRebootBtn = document.getElementById("bulkRebootBtn");
+const statusBox = document.getElementById("statusBox");
+
+// File Manager Tab
+const fileManagerDeviceSelect = document.getElementById("fileManagerDeviceSelect");
+const fileManagerUpBtn = document.getElementById("fileManagerUpBtn");
+const fileManagerPathInput = document.getElementById("fileManagerPathInput");
+const fileManagerRefreshBtn = document.getElementById("fileManagerRefreshBtn");
+const fileManagerMkdirBtn = document.getElementById("fileManagerMkdirBtn");
+const fileManagerUploadBtn = document.getElementById("fileManagerUploadBtn");
+const fileManagerBody = document.getElementById("fileManagerBody");
+
+// Installed Apps Tab
+const appsDeviceSelect = document.getElementById("appsDeviceSelect");
+const appsSearchInput = document.getElementById("appsSearchInput");
+const appsRefreshBtn = document.getElementById("appsRefreshBtn");
+const appsBulkUninstallBtn = document.getElementById("appsBulkUninstallBtn");
+const appsSelectAllCheck = document.getElementById("appsSelectAllCheck");
+const appsBody = document.getElementById("appsBody");
+
+// Deployment Log Tab
+const logsBody = document.getElementById("logsBody");
+const clearLogsBtn = document.getElementById("clearLogsBtn");
+
+// --- INTERACTIVE CONTROLS LOCK HELPER ---
+const bulkInteractiveElements = [
+    ipInput, connectBtn, usbBtn, refreshDevicesBtn, selectAllBtn, unselectAllBtn,
+    bulkCleanupBtn, bulkInstallBtn, bulkPushBtn, bulkRebootBtn, ...bulkRotateButtons
 ];
 
-// Load previously saved IP on start
-if (localStorage.getItem("savedDeviceIp")) {
-    ipInput.value = localStorage.getItem("savedDeviceIp");
-}
-
-function disableAllControls() {
-    allInteractiveElements.forEach(el => {
-        if (el) el.disabled = true;
+function setBulkControlsLock(locked) {
+    bulkInteractiveElements.forEach(el => {
+        if (el) el.disabled = locked;
+    });
+    // Checkboxes inside the list
+    const checks = devicesChecklist.querySelectorAll("input[type='checkbox']");
+    checks.forEach(ch => {
+        ch.disabled = locked;
     });
 }
 
-function enableAllControls() {
-    allInteractiveElements.forEach(el => {
-        if (el) el.disabled = false;
-    });
-}
-
-// Display messages in status box with premium colors
+// Display messages in Bulk status box
 function showStatus(message, type = "info") {
     statusBox.style.display = "block";
     statusBox.style.whiteSpace = "pre-wrap";
     statusBox.textContent = message;
 
     if (type === "success") {
-        statusBox.style.background = "#edf9ee";
-        statusBox.style.color = "#19743a";
-        statusBox.style.border = "1px solid #14863f";
+        statusBox.style.background = "var(--success-bg)";
+        statusBox.style.color = "var(--success)";
+        statusBox.style.borderColor = "var(--success)";
     } else if (type === "error") {
-        statusBox.style.background = "#fde8e8";
-        statusBox.style.color = "#9b1c1c";
-        statusBox.style.border = "1px solid #f8b4b4";
-    } else { // info / loading
-        statusBox.style.background = "#e1effe";
-        statusBox.style.color = "#1e429f";
-        statusBox.style.border = "1px solid #a4cafe";
+        statusBox.style.background = "var(--danger-bg)";
+        statusBox.style.color = "var(--danger)";
+        statusBox.style.borderColor = "var(--danger)";
+    } else { // info
+        statusBox.style.background = "var(--info-bg)";
+        statusBox.style.color = "var(--info)";
+        statusBox.style.borderColor = "var(--info)";
     }
 }
 
-// Refresh connection status badge
-async function refreshConnectionStatus() {
-    try {
-        const devices = await window.api.getDevices();
-        if (devices && devices.length > 0) {
-            statusBadge.textContent = "Connected";
-            statusBadge.className = "status connected";
+// --- INITIALIZATION ---
+document.addEventListener("DOMContentLoaded", () => {
+    // 1. Theme Configuration
+    const savedTheme = localStorage.getItem("theme") || "dark";
+    if (savedTheme === "light") {
+        document.body.classList.remove("dark-mode");
+        themeIcon.className = "fa-solid fa-moon";
+    } else {
+        document.body.classList.add("dark-mode");
+        themeIcon.className = "fa-solid fa-sun";
+    }
+
+    // 2. Load Saved IP address
+    if (localStorage.getItem("savedDeviceIp")) {
+        ipInput.value = localStorage.getItem("savedDeviceIp");
+    }
+
+    // 3. Tab switching binding
+    tabButtons.forEach(btn => {
+        btn.addEventListener("click", () => {
+            const targetTab = btn.getAttribute("data-tab");
             
-            // If statusBox is not showing an active message, show connection info
-            if (statusBox.style.display === "none" || statusBox.textContent.includes("No connected devices")) {
-                showStatus(`Connected to device(s): ${devices.join(", ")}`, "success");
-            }
-            return true;
-        } else {
-            statusBadge.textContent = "Disconnected";
-            statusBadge.className = "status disconnected";
-            return false;
-        }
-    } catch (err) {
-        console.error("Failed to check connection status:", err);
-        statusBadge.textContent = "Disconnected";
-        statusBadge.className = "status disconnected";
-        return false;
+            // Toggle active classes
+            tabButtons.forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+
+            tabPanels.forEach(p => p.classList.remove("active"));
+            document.getElementById(`panel-${targetTab}`).classList.add("active");
+        });
+    });
+
+    // 4. Device Discovery Poll
+    pollDevices();
+    setInterval(pollDevices, 5000);
+});
+
+// Theme switcher event
+themeToggleBtn.addEventListener("click", () => {
+    const isDark = document.body.classList.toggle("dark-mode");
+    if (isDark) {
+        themeIcon.className = "fa-solid fa-sun";
+        localStorage.setItem("theme", "dark");
+    } else {
+        themeIcon.className = "fa-solid fa-moon";
+        localStorage.setItem("theme", "light");
     }
+});
+
+// --- DEPLOYMENT LOG LOGGER ---
+function logDeployment(deviceId, operation, statusDetails, isSuccess) {
+    const now = new Date();
+    const timeStr = now.toTimeString().split(' ')[0];
+    
+    // Get device name/nickname
+    const dev = connectedDevices.find(d => d.id === deviceId);
+    const deviceName = dev ? dev.name : deviceId;
+
+    const logEntry = {
+        time: timeStr,
+        device: deviceName,
+        operation: operation,
+        status: statusDetails,
+        success: isSuccess
+    };
+
+    deploymentLogs.unshift(logEntry); // Add to beginning
+    renderLogs();
 }
 
-// WIFI Connect Button
-connectBtn.addEventListener("click", async () => {
-    const ip = ipInput.value.trim();
-    if (!ip) {
-        showStatus("Please enter a device IP address first.", "error");
+function renderLogs() {
+    if (deploymentLogs.length === 0) {
+        logsBody.innerHTML = `
+            <tr>
+                <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                    No deployments performed yet. Trigger bulk actions to see status.
+                </td>
+            </tr>
+        `;
         return;
     }
 
-    // Save IP to localStorage
-    localStorage.setItem("savedDeviceIp", ip);
+    logsBody.innerHTML = deploymentLogs.map(log => {
+        const badgeClass = log.success ? "badge-online" : "badge-offline";
+        const badgeLabel = log.success ? "Success" : "Failed";
+        return `
+            <tr>
+                <td class="progress-time">${log.time}</td>
+                <td><strong>${log.device}</strong></td>
+                <td>${log.operation}</td>
+                <td>
+                    <span class="badge ${badgeClass}">${badgeLabel}</span>
+                    <span style="font-size: 12px; margin-left: 8px; color: var(--text-muted);">${log.status}</span>
+                </td>
+            </tr>
+        `;
+    }).join("");
+}
 
-    disableAllControls();
-    statusBadge.textContent = "Connecting...";
-    statusBadge.className = "status connecting";
-    showStatus(`Attempting connection to ${ip}...`, "info");
+clearLogsBtn.addEventListener("click", () => {
+    deploymentLogs = [];
+    renderLogs();
+});
+
+// --- DEVICE DISCOVERY AND SIDEBAR ---
+async function pollDevices() {
+    try {
+        const devices = await window.api.getDevicesDetails();
+        connectedDevices = devices;
+
+        // Render Sidebar checklist
+        renderDevicesChecklist();
+        
+        // Refresh Device Selector Dropdowns
+        refreshDeviceDropdowns();
+    } catch (err) {
+        console.error("Discovery polling error:", err);
+    }
+}
+
+function renderDevicesChecklist() {
+    if (connectedDevices.length === 0) {
+        devicesChecklist.innerHTML = `
+            <div style="text-align: center; color: var(--text-muted); font-size: 12px; margin-top: 20px;">
+                No Android TVs connected.<br>Use IP or USB connection.
+            </div>
+        `;
+        selectedDeviceIds.clear();
+        return;
+    }
+
+    devicesChecklist.innerHTML = connectedDevices.map(dev => {
+        const isChecked = selectedDeviceIds.has(dev.id);
+        const connectionBadgeClass = dev.type === "Wi-Fi" ? "badge-wifi" : "badge-usb";
+        const statusBadgeClass = dev.status === "Online" ? "badge-online" : "badge-offline";
+        const checkboxDisabled = dev.status !== "Online" ? "disabled" : "";
+
+        return `
+            <div class="device-item">
+                <div class="device-item-left">
+                    <input type="checkbox" data-id="${dev.id}" ${isChecked ? 'checked' : ''} ${checkboxDisabled}>
+                    <div class="device-item-info">
+                        <div class="device-item-name" title="${dev.name}">${dev.name}</div>
+                        <div class="device-item-sub">ID: ${dev.id}</div>
+                    </div>
+                </div>
+                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                    <span class="badge ${connectionBadgeClass}">${dev.type}</span>
+                    <span class="badge ${statusBadgeClass}">${dev.status}</span>
+                </div>
+            </div>
+        `;
+    }).join("");
+
+    // Bind checkbox changes
+    const checks = devicesChecklist.querySelectorAll("input[type='checkbox']");
+    checks.forEach(chk => {
+        chk.addEventListener("change", () => {
+            const devId = chk.getAttribute("data-id");
+            if (chk.checked) {
+                selectedDeviceIds.add(devId);
+            } else {
+                selectedDeviceIds.delete(devId);
+            }
+        });
+    });
+}
+
+function refreshDeviceDropdowns() {
+    // Keep active selections if they are still online
+    const oldFileVal = fileManagerDeviceSelect.value;
+    const oldAppsVal = appsDeviceSelect.value;
+
+    const onlineDevices = connectedDevices.filter(d => d.status === "Online");
+
+    const optionsHTML = `
+        <option value="">-- Choose Target TV --</option>
+        ${onlineDevices.map(d => `<option value="${d.id}">${d.name}</option>`).join("")}
+    `;
+
+    fileManagerDeviceSelect.innerHTML = optionsHTML;
+    appsDeviceSelect.innerHTML = optionsHTML;
+
+    // Restore selected values if still online
+    if (onlineDevices.some(d => d.id === oldFileVal)) {
+        fileManagerDeviceSelect.value = oldFileVal;
+    } else if (oldFileVal) {
+        fileManagerDeviceSelect.value = "";
+        activeFileManagerDevice = "";
+        renderFilesEmpty("Active TV device disconnected.");
+    }
+
+    if (onlineDevices.some(d => d.id === oldAppsVal)) {
+        appsDeviceSelect.value = oldAppsVal;
+    } else if (oldAppsVal) {
+        appsDeviceSelect.value = "";
+        activeAppsDevice = "";
+        renderAppsEmpty("Active TV device disconnected.");
+    }
+}
+
+// Sidebar Checklist Actions
+selectAllBtn.addEventListener("click", () => {
+    connectedDevices.forEach(d => {
+        if (d.status === "Online") {
+            selectedDeviceIds.add(d.id);
+        }
+    });
+    renderDevicesChecklist();
+});
+
+unselectAllBtn.addEventListener("click", () => {
+    selectedDeviceIds.clear();
+    renderDevicesChecklist();
+});
+
+refreshDevicesBtn.addEventListener("click", async () => {
+    refreshDevicesBtn.disabled = true;
+    await pollDevices();
+    refreshDevicesBtn.disabled = false;
+});
+
+// --- WIFI / USB CONNECTIONS ---
+connectBtn.addEventListener("click", async () => {
+    const ip = ipInput.value.trim();
+    if (!ip) {
+        showStatus("Please enter an Android TV IP address.", "error");
+        return;
+    }
+
+    localStorage.setItem("savedDeviceIp", ip);
+    setBulkControlsLock(true);
+    showStatus(`Connecting to Wi-Fi TV at ${ip}...`, "info");
 
     try {
         const result = await window.api.connectWifi(ip);
         if (result.success) {
-            showStatus(`Successfully connected to ${ip}!\n${result.message}`, "success");
+            showStatus(`Wi-Fi connection established!\n${result.message}`, "success");
+            // Auto-check the connected device in checklist
+            await pollDevices();
+            const newDev = connectedDevices.find(d => d.id.includes(ip));
+            if (newDev) selectedDeviceIds.add(newDev.id);
         } else {
             showStatus(`Connection failed:\n${result.error}`, "error");
         }
     } catch (err) {
-        showStatus(`Connection error:\n${err.message || err}`, "error");
+        showStatus(`Connection error: ${err.message || err}`, "error");
     } finally {
-        await refreshConnectionStatus();
-        enableAllControls();
+        await pollDevices();
+        setBulkControlsLock(false);
     }
 });
 
-// USB Check Button
 usbBtn.addEventListener("click", async () => {
-    disableAllControls();
-    showStatus("Scanning for USB connected Android devices...", "info");
+    setBulkControlsLock(true);
+    showStatus("Scanning for USB-connected Android TVs...", "info");
 
     try {
         const result = await window.api.checkUsb();
         if (result.success) {
             showStatus(result.message, "success");
+            await pollDevices();
+            // Auto check detected USB devices
+            if (result.devices) {
+                result.devices.forEach(id => selectedDeviceIds.add(id));
+            }
         } else {
             showStatus(result.message || result.error, "error");
         }
     } catch (err) {
-        showStatus(`USB scan error:\n${err.message || err}`, "error");
+        showStatus(`USB check error: ${err.message || err}`, "error");
     } finally {
-        await refreshConnectionStatus();
-        enableAllControls();
+        await pollDevices();
+        setBulkControlsLock(false);
     }
 });
 
-// Start Cleanup Process (Bloatware removal + optimizations)
-cleanupBtn.addEventListener("click", async () => {
-    const isConnected = await refreshConnectionStatus();
-    if (!isConnected) {
-        showStatus("No device connected. Please connect a device via Wi-Fi or USB first.", "error");
-        return;
-    }
+// --- BULK OPERATIONS TAB CONTROLS ---
 
-    disableAllControls();
-    showStatus("Starting cleanup process...\nUninstalling bloatware apps and applying signage settings optimizations. Please wait...", "info");
+// Helper: Ensure target devices selected
+function getSelectedTargetsOrWarn() {
+    const targets = Array.from(selectedDeviceIds);
+    if (targets.length === 0) {
+        showStatus("Please select one or more connected devices from the sidebar checkboxes first.", "error");
+        return null;
+    }
+    return targets;
+}
+
+// Bulk Cleanup
+bulkCleanupBtn.addEventListener("click", async () => {
+    const targets = getSelectedTargetsOrWarn();
+    if (!targets) return;
+
+    setBulkControlsLock(true);
+    showStatus(`Running cleanup on ${targets.length} device(s) in parallel...\nApplying settings optimizations and removing bloatware.`, "info");
 
     try {
-        const result = await window.api.cleanup();
+        const result = await window.api.bulkCleanup(targets);
         if (result.success) {
-            let msg = "Cleanup & Optimizations completed!\n\n";
+            let successCount = 0;
+            let msg = "Bulk Cleanup Completed!\n\n";
+
             result.results.forEach(res => {
-                msg += `• ${res.item}: ${res.status}\n`;
+                const deviceLabel = connectedDevices.find(d => d.id === res.deviceId)?.name || res.deviceId;
+                if (res.success) {
+                    successCount++;
+                    msg += `✓ ${deviceLabel}: Optimized\n`;
+                    logDeployment(res.deviceId, "Optimize & Cleanup", "Optimizations successfully applied", true);
+                } else {
+                    msg += `✗ ${deviceLabel}: Failed (${res.error})\n`;
+                    logDeployment(res.deviceId, "Optimize & Cleanup", `Failed: ${res.error}`, false);
+                }
             });
-            showStatus(msg, "success");
+
+            showStatus(msg, successCount === targets.length ? "success" : "info");
         } else {
-            showStatus(`Cleanup failed:\n${result.error}`, "error");
+            showStatus(`Bulk operations failed:\n${result.error}`, "error");
         }
     } catch (err) {
-        showStatus(`Cleanup error:\n${err.message || err}`, "error");
+        showStatus(`Bulk cleanup error:\n${err.message || err}`, "error");
     } finally {
-        await refreshConnectionStatus();
-        enableAllControls();
+        setBulkControlsLock(false);
     }
 });
 
-// Choose & Install APK
-installCustomApkBtn.addEventListener("click", async () => {
-    const isConnected = await refreshConnectionStatus();
-    if (!isConnected) {
-        showStatus("No device connected. Please connect a device via Wi-Fi or USB first.", "error");
-        return;
-    }
+// Bulk Signage Deploy APK
+bulkInstallBtn.addEventListener("click", async () => {
+    const targets = getSelectedTargetsOrWarn();
+    if (!targets) return;
 
-    disableAllControls();
-    showStatus("Please choose an APK file from the file dialog...", "info");
+    setBulkControlsLock(true);
+    showStatus("Please select the signage APK package from the file dialog to deploy...", "info");
 
     try {
-        // Passing null forces the file dialog to open
-        const result = await window.api.installApk(null);
+        const result = await window.api.bulkInstall(targets, null);
         if (result.success) {
-            showStatus(result.message, "success");
-        } else {
-            showStatus(`Installation failed / cancelled:\n${result.error}`, "error");
-        }
-    } catch (err) {
-        showStatus(`Installation error:\n${err.message || err}`, "error");
-    } finally {
-        await refreshConnectionStatus();
-        enableAllControls();
-    }
-});
+            let successCount = 0;
+            let msg = `Bulk Deployment Done! (APK: ${result.apkPath.split(/[\\/]/).pop()})\n\n`;
 
-// Select & Send multiple files to device
-sendFilesBtn.addEventListener("click", async () => {
-    const isConnected = await refreshConnectionStatus();
-    if (!isConnected) {
-        showStatus("No device connected. Please connect a device via Wi-Fi or USB first.", "error");
-        return;
-    }
-
-    disableAllControls();
-    showStatus("Please select one or more files to send to the device...", "info");
-
-    try {
-        const filePaths = await window.api.openMultiFiles();
-        if (!filePaths || filePaths.length === 0) {
-            showStatus("Send files cancelled. No files selected.", "error");
-            enableAllControls();
-            return;
-        }
-
-        showStatus(`Sending ${filePaths.length} file(s) to device (/sdcard/)... Please wait.`, "info");
-        const result = await window.api.pushFiles(filePaths, "/sdcard/");
-        if (result.success) {
-            let msg = `Successfully sent ${filePaths.length} file(s) to /sdcard/!\n\n`;
             result.results.forEach(res => {
-                msg += `• ${res.file}: ${res.status}${res.error ? ' (' + res.error + ')' : ''}\n`;
+                const deviceLabel = connectedDevices.find(d => d.id === res.deviceId)?.name || res.deviceId;
+                if (res.success) {
+                    successCount++;
+                    msg += `✓ ${deviceLabel}: Installed\n`;
+                    logDeployment(res.deviceId, "Install APK", "Package installed successfully", true);
+                } else {
+                    msg += `✗ ${deviceLabel}: Failed: ${res.message}\n`;
+                    logDeployment(res.deviceId, "Install APK", `Failed: ${res.message}`, false);
+                }
             });
-            showStatus(msg, "success");
+
+            showStatus(msg, successCount === targets.length ? "success" : "info");
         } else {
-            showStatus(`Failed to send files:\n${result.error}`, "error");
+            showStatus(`Installation failed or cancelled:\n${result.error}`, "error");
         }
     } catch (err) {
-        showStatus(`File send error:\n${err.message || err}`, "error");
+        showStatus(`Deployment error:\n${err.message || err}`, "error");
     } finally {
-        enableAllControls();
+        setBulkControlsLock(false);
     }
 });
 
-// Rotation Buttons
-rotationButtons.forEach(btn => {
+// Bulk Push Files
+bulkPushBtn.addEventListener("click", async () => {
+    const targets = getSelectedTargetsOrWarn();
+    if (!targets) return;
+
+    const dest = bulkDestPath.value.trim() || "/sdcard/";
+    setBulkControlsLock(true);
+    showStatus("Please choose files to push to all selected TVs...", "info");
+
+    try {
+        const result = await window.api.bulkPush(targets, dest);
+        if (result.success) {
+            let successCount = 0;
+            let msg = `Bulk file transfer completed! (${result.fileCount} file(s) pushed to ${dest})\n\n`;
+
+            result.results.forEach(res => {
+                const deviceLabel = connectedDevices.find(d => d.id === res.deviceId)?.name || res.deviceId;
+                if (res.success) {
+                    successCount++;
+                    msg += `✓ ${deviceLabel}: Uploaded ${result.fileCount} files\n`;
+                    logDeployment(res.deviceId, "Send Files", `Uploaded ${result.fileCount} files to ${dest}`, true);
+                } else {
+                    msg += `✗ ${deviceLabel}: Failed: ${res.error}\n`;
+                    logDeployment(res.deviceId, "Send Files", `Failed: ${res.error}`, false);
+                }
+            });
+
+            showStatus(msg, successCount === targets.length ? "success" : "info");
+        } else {
+            showStatus(`File transfer cancelled or failed:\n${result.error}`, "error");
+        }
+    } catch (err) {
+        showStatus(`Bulk push error:\n${err.message || err}`, "error");
+    } finally {
+        setBulkControlsLock(false);
+    }
+});
+
+// Bulk Orientation Screen Rotate
+bulkRotateButtons.forEach(btn => {
     btn.addEventListener("click", async () => {
-        const isConnected = await refreshConnectionStatus();
-        if (!isConnected) {
-            showStatus("No device connected. Please connect a device via Wi-Fi or USB first.", "error");
-            return;
-        }
+        const targets = getSelectedTargetsOrWarn();
+        if (!targets) return;
 
         const mode = parseInt(btn.getAttribute("data-rotation"), 10);
-        disableAllControls();
-        showStatus("Setting screen rotation orientation...", "info");
+        const modes = ["Portrait (0°)", "Landscape (90°)", "Reverse Portrait (180°)", "Reverse Landscape (270°)"];
+        const modeLabel = modes[mode] || mode;
+
+        setBulkControlsLock(true);
+        showStatus(`Rotating screens to ${modeLabel} in parallel...`, "info");
 
         try {
-            const result = await window.api.rotate(mode);
+            const result = await window.api.bulkRotate(targets, mode);
             if (result.success) {
-                showStatus(result.message, "success");
+                let successCount = 0;
+                let msg = `Orientation change applied!\n\n`;
+
+                result.results.forEach(res => {
+                    const deviceLabel = connectedDevices.find(d => d.id === res.deviceId)?.name || res.deviceId;
+                    if (res.success) {
+                        successCount++;
+                        msg += `✓ ${deviceLabel}: Rotated to ${modeLabel}\n`;
+                        logDeployment(res.deviceId, "Rotation Control", `Set rotation to ${modeLabel}`, true);
+                    } else {
+                        msg += `✗ ${deviceLabel}: Failed: ${res.message}\n`;
+                        logDeployment(res.deviceId, "Rotation Control", `Failed: ${res.message}`, false);
+                    }
+                });
+
+                showStatus(msg, successCount === targets.length ? "success" : "info");
             } else {
-                showStatus(`Rotation failed:\n${result.error}`, "error");
+                showStatus(`Rotation operations failed:\n${result.error}`, "error");
             }
         } catch (err) {
-            showStatus(`Rotation error:\n${err.message || err}`, "error");
+            showStatus(`Bulk rotation error:\n${err.message || err}`, "error");
         } finally {
-            enableAllControls();
+            setBulkControlsLock(false);
         }
     });
 });
 
-// Reboot Button
-rebootBtn.addEventListener("click", async () => {
-    const isConnected = await refreshConnectionStatus();
-    if (!isConnected) {
-        showStatus("No device connected. Please connect a device via Wi-Fi or USB first.", "error");
+// Bulk Reboot
+bulkRebootBtn.addEventListener("click", async () => {
+    const targets = getSelectedTargetsOrWarn();
+    if (!targets) return;
+
+    if (!confirm(`Are you sure you want to REBOOT all ${targets.length} selected TVs simultaneously?`)) {
         return;
     }
 
-    if (!confirm("Are you sure you want to reboot the connected device?")) {
-        return;
-    }
-
-    disableAllControls();
-    showStatus("Sending reboot command to device...", "info");
+    setBulkControlsLock(true);
+    showStatus("Sending reboot command to selected devices in parallel...", "info");
 
     try {
-        const result = await window.api.reboot();
+        const result = await window.api.bulkReboot(targets);
         if (result.success) {
-            showStatus(result.message, "success");
+            let successCount = 0;
+            let msg = "Reboot commands broadcasted!\n\n";
+
+            result.results.forEach(res => {
+                const deviceLabel = connectedDevices.find(d => d.id === res.deviceId)?.name || res.deviceId;
+                if (res.success) {
+                    successCount++;
+                    msg += `✓ ${deviceLabel}: Rebooting...\n`;
+                    logDeployment(res.deviceId, "Reboot", "Reboot command sent successfully", true);
+                    selectedDeviceIds.delete(res.deviceId); // Remove since it's going offline
+                } else {
+                    msg += `✗ ${deviceLabel}: Failed: ${res.message}\n`;
+                    logDeployment(res.deviceId, "Reboot", `Failed: ${res.message}`, false);
+                }
+            });
+
+            showStatus(msg, successCount === targets.length ? "success" : "info");
+            setTimeout(pollDevices, 3000);
         } else {
-            showStatus(`Reboot failed:\n${result.error}`, "error");
+            showStatus(`Reboot operations failed:\n${result.error}`, "error");
         }
     } catch (err) {
         showStatus(`Reboot error:\n${err.message || err}`, "error");
     } finally {
-        // Delay connection refresh because device is rebooting
-        setTimeout(async () => {
-            await refreshConnectionStatus();
-            enableAllControls();
-        }, 3000);
+        setBulkControlsLock(false);
     }
 });
 
-// Initial startup scan
-document.addEventListener("DOMContentLoaded", () => {
-    refreshConnectionStatus();
+// --- DEVICE FILE MANAGER TAB ---
+
+// Enable/Disable toolbar controls based on active selection
+function setFileManagerControlsEnabled(enabled) {
+    fileManagerUpBtn.disabled = !enabled;
+    fileManagerRefreshBtn.disabled = !enabled;
+    fileManagerMkdirBtn.disabled = !enabled;
+    fileManagerUploadBtn.disabled = !enabled;
+}
+
+function renderFilesEmpty(message) {
+    fileManagerBody.innerHTML = `
+        <tr>
+            <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                ${message}
+            </td>
+        </tr>
+    `;
+}
+
+// Load files list from device
+async function loadFilesList() {
+    if (!activeFileManagerDevice) {
+        renderFilesEmpty("Select a connected TV device from the dropdown to browse its storage.");
+        setFileManagerControlsEnabled(false);
+        return;
+    }
+
+    setFileManagerControlsEnabled(false);
+    fileManagerBody.innerHTML = `
+        <tr>
+            <td colspan="5" style="text-align: center; color: var(--primary); padding: 30px 0;">
+                <i class="fa-solid fa-spinner fa-spin" style="margin-right: 8px;"></i> Reading TV directories...
+            </td>
+        </tr>
+    `;
+
+    try {
+        const result = await window.api.fileManagerList(activeFileManagerDevice, currentPath);
+        if (result.success) {
+            setFileManagerControlsEnabled(true);
+            
+            // Enable/disable UP button based on root
+            fileManagerUpBtn.disabled = currentPath === "" || currentPath === "/";
+
+            if (result.items.length === 0) {
+                renderFilesEmpty("This directory is empty.");
+                return;
+            }
+
+            // Render files list
+            fileManagerBody.innerHTML = result.items.map(item => {
+                const icon = item.isDir ? "fa-folder" : "fa-file";
+                const iconColor = item.isDir ? "#f59e0b" : "#94a3b8";
+                const sizeLabel = item.isDir ? "--" : formatBytes(item.size);
+                
+                const trClass = item.isDir ? "style='cursor: pointer; font-weight: 500;'" : "";
+                const dbClickAttr = item.isDir ? `ondblclick="navigateFolder('${item.name}')"` : "";
+
+                return `
+                    <tr ${trClass} ${dbClickAttr}>
+                        <td>
+                            <i class="fa-solid ${icon}" style="color: ${iconColor}; margin-right: 8px;"></i>
+                            ${item.name}
+                        </td>
+                        <td>${item.isDir ? 'Folder' : 'File'}</td>
+                        <td>${sizeLabel}</td>
+                        <td class="progress-time">${item.date}</td>
+                        <td style="text-align: right;">
+                            <button class="btn btn-secondary discovery-small-btn" onclick="renameFileManagerItem('${item.name}')" title="Rename"><i class="fa-solid fa-pen"></i></button>
+                            ${!item.isDir ? `<button class="btn btn-secondary discovery-small-btn" onclick="downloadFileManagerFile('${item.name}')" title="Download"><i class="fa-solid fa-download"></i></button>` : ''}
+                            <button class="btn btn-danger discovery-small-btn" onclick="deleteFileManagerItem('${item.name}', ${item.isDir})" title="Delete"><i class="fa-solid fa-trash"></i></button>
+                        </td>
+                    </tr>
+                `;
+            }).join("");
+        } else {
+            renderFilesEmpty(`Error reading folder: ${result.error}`);
+            setFileManagerControlsEnabled(true);
+            fileManagerUpBtn.disabled = currentPath === "" || currentPath === "/";
+        }
+    } catch (err) {
+        renderFilesEmpty(`Read error: ${err.message || err}`);
+        setFileManagerControlsEnabled(true);
+    }
+}
+
+// Navigation helpers exposed globally so ondblclick can trigger them
+window.navigateFolder = function(folderName) {
+    // Remove double slashes
+    if (currentPath === "/") {
+        currentPath = "/" + folderName;
+    } else {
+        currentPath = currentPath + "/" + folderName;
+    }
+    fileManagerPathInput.value = currentPath;
+    loadFilesList();
+};
+
+// Back Up Navigation
+fileManagerUpBtn.addEventListener("click", () => {
+    if (currentPath === "" || currentPath === "/") return;
+    
+    const parts = currentPath.split("/");
+    parts.pop();
+    currentPath = parts.join("/") || "/";
+    fileManagerPathInput.value = currentPath;
+    loadFilesList();
+});
+
+// Dropdown selector
+fileManagerDeviceSelect.addEventListener("change", (e) => {
+    activeFileManagerDevice = e.target.value;
+    currentPath = "/sdcard";
+    fileManagerPathInput.value = currentPath;
+    loadFilesList();
+});
+
+// Refresh button
+fileManagerRefreshBtn.addEventListener("click", loadFilesList);
+
+// Create Folder mkdir
+fileManagerMkdirBtn.addEventListener("click", async () => {
+    if (!activeFileManagerDevice) return;
+    const folderName = prompt("Enter new folder name:");
+    if (!folderName || !folderName.trim()) return;
+
+    showStatus("Creating directory...", "info");
+    const targetFolder = currentPath === "/" ? `/${folderName.trim()}` : `${currentPath}/${folderName.trim()}`;
+
+    try {
+        const res = await window.api.fileManagerMkdir(activeFileManagerDevice, targetFolder);
+        if (res.success) {
+            loadFilesList();
+        } else {
+            alert(`Mkdir failed: ${res.error}`);
+        }
+    } catch (err) {
+        alert(`Error: ${err.message}`);
+    }
+});
+
+// Upload File
+fileManagerUploadBtn.addEventListener("click", async () => {
+    if (!activeFileManagerDevice) return;
+    
+    fileManagerUploadBtn.disabled = true;
+    try {
+        const result = await window.api.fileManagerUpload(activeFileManagerDevice, currentPath);
+        if (result.success) {
+            loadFilesList();
+        } else if (!result.error.includes("cancelled")) {
+            alert(`Upload failed: ${result.error}`);
+        }
+    } catch (err) {
+        alert(`Upload error: ${err.message}`);
+    } finally {
+        fileManagerUploadBtn.disabled = false;
+    }
+});
+
+// Download File (Global handler)
+window.downloadFileManagerFile = async function(fileName) {
+    if (!activeFileManagerDevice) return;
+    const remotePath = currentPath === "/" ? `/${fileName}` : `${currentPath}/${fileName}`;
+
+    try {
+        const res = await window.api.fileManagerDownload(activeFileManagerDevice, remotePath);
+        if (res.success) {
+            alert(`File downloaded successfully!`);
+        } else if (!res.error.includes("cancelled")) {
+            alert(`Download failed: ${res.error}`);
+        }
+    } catch (err) {
+        alert(`Download error: ${err.message}`);
+    }
+};
+
+// Delete File/Folder (Global handler)
+window.deleteFileManagerItem = async function(itemName, isDir) {
+    if (!activeFileManagerDevice) return;
+    const targetPath = currentPath === "/" ? `/${itemName}` : `${currentPath}/${itemName}`;
+
+    if (!confirm(`Are you sure you want to delete this ${isDir ? 'folder' : 'file'}?\nPath: ${targetPath}`)) {
+        return;
+    }
+
+    try {
+        const res = await window.api.fileManagerDelete(activeFileManagerDevice, targetPath, isDir);
+        if (res.success) {
+            loadFilesList();
+        } else {
+            alert(`Delete failed: ${res.error}`);
+        }
+    } catch (err) {
+        alert(`Delete error: ${err.message}`);
+    }
+};
+
+// Rename File/Folder (Global handler)
+window.renameFileManagerItem = async function(itemName) {
+    if (!activeFileManagerDevice) return;
+    const oldPath = currentPath === "/" ? `/${itemName}` : `${currentPath}/${itemName}`;
+    
+    const newName = prompt(`Rename "${itemName}" to:`, itemName);
+    if (!newName || !newName.trim() || newName.trim() === itemName) return;
+
+    const newPath = currentPath === "/" ? `/${newName.trim()}` : `${currentPath}/${newName.trim()}`;
+
+    try {
+        const res = await window.api.fileManagerRename(activeFileManagerDevice, oldPath, newPath);
+        if (res.success) {
+            loadFilesList();
+        } else {
+            alert(`Rename failed: ${res.error}`);
+        }
+    } catch (err) {
+        alert(`Rename error: ${err.message}`);
+    }
+};
+
+// Formats file sizes
+function formatBytes(bytes, decimals = 2) {
+    if (!+bytes) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+}
+
+// --- INSTALLED APPLICATIONS TAB ---
+
+function setAppsManagerControlsEnabled(enabled) {
+    appsSearchInput.disabled = !enabled;
+    appsRefreshBtn.disabled = !enabled;
+    appsBulkUninstallBtn.disabled = !enabled;
+    appsSelectAllCheck.disabled = !enabled;
+}
+
+function renderAppsEmpty(message) {
+    appsBody.innerHTML = `
+        <tr>
+            <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                ${message}
+            </td>
+        </tr>
+    `;
+}
+
+// Fetch applications package list
+async function loadAppsList() {
+    if (!activeAppsDevice) {
+        renderAppsEmpty("Select a connected TV device from the dropdown to list its applications.");
+        setAppsManagerControlsEnabled(false);
+        return;
+    }
+
+    setAppsManagerControlsEnabled(false);
+    appsSelectAllCheck.checked = false;
+    appsBody.innerHTML = `
+        <tr>
+            <td colspan="4" style="text-align: center; color: var(--primary); padding: 30px 0;">
+                <i class="fa-solid fa-spinner fa-spin" style="margin-right: 8px;"></i> Loading package registry from TV...
+            </td>
+        </tr>
+    `;
+
+    try {
+        const result = await window.api.appsList(activeAppsDevice);
+        if (result.success) {
+            installedAppsList = result.apps;
+            setAppsManagerControlsEnabled(true);
+            renderAppsRows(installedAppsList);
+        } else {
+            renderAppsEmpty(`Error listing apps: ${result.error}`);
+            setAppsManagerControlsEnabled(true);
+        }
+    } catch (err) {
+        renderAppsEmpty(`Apps load error: ${err.message || err}`);
+        setAppsManagerControlsEnabled(true);
+    }
+}
+
+// Render apps table rows
+function renderAppsRows(apps) {
+    if (apps.length === 0) {
+        renderAppsEmpty("No packages match your search filter.");
+        return;
+    }
+
+    appsBody.innerHTML = apps.map(app => {
+        return `
+            <tr>
+                <td style="text-align: center;">
+                    <input type="checkbox" class="app-row-check" data-pkg="${app.packageName}">
+                </td>
+                <td><strong>${app.friendlyName}</strong></td>
+                <td style="font-family: monospace; font-size: 12px; color: var(--text-muted);">${app.packageName}</td>
+                <td style="text-align: right;">
+                    <button class="btn btn-danger discovery-small-btn" onclick="uninstallSingleApp('${app.packageName}')">
+                        <i class="fa-solid fa-trash"></i> Uninstall
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join("");
+
+    // Bind checkboxes to check state logic
+    const rowChecks = appsBody.querySelectorAll(".app-row-check");
+    rowChecks.forEach(ch => {
+        ch.addEventListener("change", () => {
+            // If all checks are checked, set parent check to checked
+            const allChecked = Array.from(rowChecks).every(c => c.checked);
+            appsSelectAllCheck.checked = allChecked;
+        });
+    });
+}
+
+// Dropdown Selector Apps
+appsDeviceSelect.addEventListener("change", (e) => {
+    activeAppsDevice = e.target.value;
+    appsSearchInput.value = "";
+    loadAppsList();
+});
+
+// Refresh Apps Button
+appsRefreshBtn.addEventListener("click", loadAppsList);
+
+// App Search input binding
+appsSearchInput.addEventListener("input", (e) => {
+    const query = e.target.value.toLowerCase().trim();
+    if (!query) {
+        renderAppsRows(installedAppsList);
+        return;
+    }
+
+    const filtered = installedAppsList.filter(app => {
+        return app.packageName.toLowerCase().includes(query) || app.friendlyName.toLowerCase().includes(query);
+    });
+    renderAppsRows(filtered);
+});
+
+// Package Selection Header check
+appsSelectAllCheck.addEventListener("change", (e) => {
+    const checks = appsBody.querySelectorAll(".app-row-check");
+    checks.forEach(ch => {
+        ch.checked = e.target.checked;
+    });
+});
+
+// Uninstall Single App
+window.uninstallSingleApp = async function(packageName) {
+    if (!activeAppsDevice) return;
+
+    if (!confirm(`Are you sure you want to uninstall this application package from the TV?\nPackage: ${packageName}`)) {
+        return;
+    }
+
+    setAppsManagerControlsEnabled(false);
+    showStatus(`Uninstalling package ${packageName} from active TV...`, "info");
+
+    try {
+        const result = await window.api.appsUninstall(activeAppsDevice, packageName);
+        if (result.success) {
+            alert(result.message);
+            loadAppsList();
+        } else {
+            alert(`Uninstall failed: ${result.error}`);
+        }
+    } catch (err) {
+        alert(`Uninstall error: ${err.message}`);
+    } finally {
+        setAppsManagerControlsEnabled(true);
+    }
+};
+
+// Bulk Uninstall Checked Apps
+appsBulkUninstallBtn.addEventListener("click", async () => {
+    if (!activeAppsDevice) return;
+    
+    const checkedBoxes = appsBody.querySelectorAll(".app-row-check:checked");
+    if (checkedBoxes.length === 0) {
+        alert("Please select one or more application packages first.");
+        return;
+    }
+
+    const packages = Array.from(checkedBoxes).map(ch => ch.getAttribute("data-pkg"));
+
+    if (!confirm(`Are you sure you want to uninstall ALL ${packages.length} selected applications simultaneously?`)) {
+        return;
+    }
+
+    setAppsManagerControlsEnabled(false);
+    showStatus(`Uninstalling ${packages.length} packages in bulk...`, "info");
+
+    try {
+        // Run in parallel
+        const results = await Promise.all(
+            packages.map(async (pkg) => {
+                try {
+                    const r = await window.api.appsUninstall(activeAppsDevice, pkg);
+                    return { pkg, success: r.success, error: r.error };
+                } catch (e) {
+                    return { pkg, success: false, error: String(e) };
+                }
+            })
+        );
+
+        let successCount = 0;
+        let msg = "Uninstall Operation Completed:\n\n";
+        results.forEach(res => {
+            if (res.success) {
+                successCount++;
+                msg += `✓ ${res.pkg}: Uninstalled\n`;
+            } else {
+                msg += `✗ ${res.pkg}: Failed (${res.error})\n`;
+            }
+        });
+
+        alert(msg);
+        loadAppsList();
+    } catch (err) {
+        alert(`Bulk uninstall error: ${err.message}`);
+    } finally {
+        setAppsManagerControlsEnabled(true);
+    }
 });
