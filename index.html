@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Android Control Center</title>
+
+    <link rel="stylesheet" href="./css/style.css">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+
+<body>
+
+    <header>
+
+        <div class="logo-section">
+
+            <div class="logo">
+                <i class="fa-solid fa-mobile-screen-button"></i>
+            </div>
+
+            <div>
+                <h1>Android Control System</h1>
+                <p>Nextview Technologies</p>
+            </div>
+
+        </div>
+
+        <div class="developer">
+            <span>Developed by</span>
+            <strong>Amit</strong>
+        </div>
+
+    </header>
+
+    <main>
+
+        <section class="card connection-card">
+
+            <div class="card-header">
+
+                <div class="title-group">
+
+                    <div class="icon-box">
+                        <i class="fa-solid fa-mobile-screen"></i>
+                    </div>
+
+                    <div>
+                        <h2>Device Connection</h2>
+                        <p>Connect your Android device</p>
+                    </div>
+
+                </div>
+
+                <div class="status disconnected" id="statusBadge">
+                    Disconnected
+                </div>
+
+            </div>
+
+            <div class="connection-grid">
+
+                <div>
+
+                    <label>Device IP (Wi-Fi Connection)</label>
+
+                    <div class="input-group">
+
+                        <input type="text" id="ipInput" placeholder="192.168.1.6">
+
+                        <button class="connect-btn" id="connectBtn">
+                            <i class="fa-solid fa-wifi"></i>
+                            Connect
+                        </button>
+
+                    </div>
+
+                </div>
+
+                <div>
+
+                    <label>USB Connection</label>
+
+                    <button class="usb-btn" id="usbBtn">
+                        <i class="fa-solid fa-mobile"></i>
+                        Check USB Device
+                    </button>
+
+                </div>
+
+            </div>
+
+            <div class="success-box" id="statusBox" style="display: none;">
+                Ready.
+            </div>
+
+        </section>
+
+        <div class="top-grid">
+
+            <section class="card">
+
+                <div class="section-title">
+                    <h3>Step 1: Remove Bloatware</h3>
+                    <p>Clean unnecessary applications from device</p>
+                </div>
+
+                <button class="danger-btn" id="cleanupBtn">
+                    Start Cleanup Process
+                </button>
+
+            </section>
+
+            <section class="card">
+
+                <div class="section-title">
+                    <h3>Step 2: Signage & Files</h3>
+                    <p>Deploy APK and manage device files</p>
+                </div>
+
+                <button class="install-btn" id="installCustomApkBtn">
+                    <i class="fa-solid fa-file-export"></i>
+                    Choose & Install APK
+                </button>
+
+                <button class="network-btn" id="sendFilesBtn">
+                    <i class="fa-solid fa-paper-plane"></i>
+                    Send Files to Device
+                </button>
+
+            </section>
+
+        </div>
+
+        <section class="card">
+
+            <div class="section-title">
+                <h3>Device Controls</h3>
+                <p>Manage device settings and orientation</p>
+            </div>
+
+            <div class="controls-grid">
+
+                <div>
+
+                    <h4>Screen Rotation</h4>
+
+                    <div class="rotation-grid">
+
+                        <button class="rotate-btn" data-rotation="0">Portrait</button>
+                        <button class="rotate-btn" data-rotation="1">Landscape</button>
+                        <button class="rotate-btn" data-rotation="2">Reverse Portrait</button>
+                        <button class="rotate-btn" data-rotation="3">Reverse Landscape</button>
+
+                    </div>
+
+                </div>
+
+                <div>
+
+                    <h4>System Controls</h4>
+
+                    <button class="reboot-btn" id="rebootBtn">
+                        Reboot Device
+                    </button>
+
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+    <footer>
+        © 2026 Nextview Technologies
+        <span>Version 1.0.0</span>
+    </footer>
+
+    <!-- Frontend controller script -->
+    <script src="./js/app.js"></script>
+
+</body>
+
+</html>

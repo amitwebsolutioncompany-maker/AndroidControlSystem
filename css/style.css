@@ -1,0 +1,222 @@
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    font-family:Segoe UI, sans-serif;
+    background:linear-gradient(90deg,#6778e7,#7650b8);
+    min-height:100vh;
+}
+
+header{
+    height:80px;
+    background:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:0 25px;
+}
+
+.logo-section{
+    display:flex;
+    align-items:center;
+    gap:15px;
+}
+
+.logo{
+    width:40px;
+    height:40px;
+    border-radius:10px;
+    background:#5f6df2;
+    color:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+
+.logo-section h1{
+    font-size:20px;
+}
+
+.logo-section p{
+    color:#777;
+}
+
+.developer{
+    text-align:right;
+}
+
+main{
+    width:1050px;
+    margin:25px auto;
+}
+
+.card{
+    background:#fff;
+    border-radius:18px;
+    padding:24px;
+    margin-bottom:22px;
+}
+
+.card-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+}
+
+.title-group{
+    display:flex;
+    gap:15px;
+}
+
+.icon-box{
+    width:45px;
+    height:45px;
+    border-radius:12px;
+    background:#eef4ff;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+
+.status{
+    padding:8px 18px;
+    border-radius:20px;
+    font-weight:600;
+}
+
+.status.connected {
+    background:#d8f5df;
+    color:#14863f;
+}
+
+.status.disconnected {
+    background:#fde8e8;
+    color:#9b1c1c;
+}
+
+.status.connecting {
+    background:#e1effe;
+    color:#1e429f;
+}
+
+.connection-grid{
+    margin-top:20px;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:20px;
+}
+
+.input-group{
+    display:flex;
+    margin-top:8px;
+}
+
+input{
+    flex:1;
+    height:42px;
+    border:1px solid #ddd;
+    border-radius:8px;
+    padding:0 12px;
+}
+
+.connect-btn{
+    width:130px;
+    margin-left:10px;
+    border:none;
+    border-radius:8px;
+    color:#fff;
+    background:#5e63f2;
+}
+
+.usb-btn{
+    width:100%;
+    height:42px;
+    border:none;
+    border-radius:8px;
+    background:#f2f2f2;
+}
+
+.success-box{
+    margin-top:18px;
+    background:#edf9ee;
+    color:#19743a;
+    padding:14px;
+    border-radius:8px;
+}
+
+.top-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:20px;
+}
+
+.section-title h3{
+    margin-bottom:6px;
+}
+
+.section-title p{
+    color:#666;
+    margin-bottom:18px;
+}
+
+.danger-btn,
+.install-btn,
+.network-btn,
+.reboot-btn{
+    width:100%;
+    height:46px;
+    border:none;
+    border-radius:8px;
+    color:#fff;
+    cursor:pointer;
+}
+
+.danger-btn{
+    background:#f23434;
+}
+
+.install-btn{
+    background:#6772f8;
+    margin-bottom:12px;
+}
+
+.network-btn{
+    background:#63b4cc;
+}
+
+.controls-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:20px;
+}
+
+.rotation-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+    margin-top:10px;
+}
+
+.rotation-grid button{
+    height:42px;
+    border:none;
+    border-radius:8px;
+    background:#f6e8cf;
+}
+
+.reboot-btn{
+    margin-top:10px;
+    background:#f23434;
+}
+
+footer{
+    background:#fff;
+    height:48px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:40px;
+}
