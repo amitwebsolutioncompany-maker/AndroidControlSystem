@@ -1,14 +1,36 @@
 {
-  "name": "android-control-center",
-  "version": "1.0.0",
-  "description": "Android TV Control Center",
+  "name": "androidcontrolsystem",
+  "version": "1.0.1",
+  "description": "Android Multi-TV Deployment Suite",
   "main": "electron/main.js",
-  "scripts": {
-    "start": "electron ."
-  },
-  "author": "",
+  "author": "Amit",
   "license": "ISC",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "dist": "electron-builder --win",
+    "win32-setup": "electron-builder --win nsis"
+  },
   "devDependencies": {
-    "electron": "^41.7.1"
+    "electron": "^41.7.1",
+    "electron-builder": "^26.15.0"
+  },
+  "build": {
+    "appId": "com.nextview.androidcontrolsystem",
+    "productName": "Android Control System",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

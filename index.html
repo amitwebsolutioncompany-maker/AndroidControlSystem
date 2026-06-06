@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Android Control Center - Nextview</title>
+    <title>Android Control System - Nextview</title>
 
     <link rel="stylesheet" href="./css/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -25,6 +25,26 @@
         </div>
 
         <div class="header-controls">
+            <!-- ADB Server controls -->
+            <div class="adb-server-controls"
+                style="display: flex; gap: 8px; align-items: center; background: rgba(255, 255, 255, 0.05); padding: 5px 10px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
+                <span
+                    style="font-size: 11px; color: #cbd5e1; font-weight: 600; text-transform: uppercase; margin-right: 4px;">ADB
+                    Server:</span>
+                <button class="btn btn-secondary discovery-small-btn" id="startAdbServerBtn" title="Start ADB Server"
+                    style="height: 28px; font-size: 11px; padding: 0 10px;">
+                    <i class="fa-solid fa-play" style="color: var(--success); font-size: 10px;"></i> Start
+                </button>
+                <button class="btn btn-secondary discovery-small-btn" id="killAdbServerBtn" title="Kill ADB Server"
+                    style="height: 28px; font-size: 11px; padding: 0 10px;">
+                    <i class="fa-solid fa-stop" style="color: var(--danger); font-size: 10px;"></i> Kill
+                </button>
+                <button class="btn btn-secondary discovery-small-btn" id="refreshDevicesHeaderBtn"
+                    title="Refresh Devices List" style="height: 28px; font-size: 11px; padding: 0 10px;">
+                    <i class="fa-solid fa-rotate-right" style="color: var(--info); font-size: 10px;"></i> Refresh
+                </button>
+            </div>
+
             <button class="theme-toggle-btn" id="themeToggleBtn" title="Toggle Light/Dark Theme">
                 <i class="fa-solid fa-sun" id="themeIcon"></i>
             </button>
@@ -42,16 +62,32 @@
         <aside class="sidebar">
 
             <div>
-                <div class="sidebar-title">Connect TV</div>
-                <div class="connection-panel">
-                    <label class="input-label">Wi-Fi Connection (Device IP)</label>
-                    <div class="ip-connect-group">
-                        <input type="text" id="ipInput" placeholder="192.168.1.6">
-                        <button class="btn btn-primary" id="connectBtn" title="Connect over Wi-Fi">
-                            <i class="fa-solid fa-wifi"></i>
+                <div class="sidebar-title">Connect & Pair TV</div>
+                <div class="connection-panel" style="display: flex; flex-direction: column; gap: 10px;">
+                    <div>
+                        <label class="input-label">Wi-Fi Connection (Device IP & Port)</label>
+                        <div class="ip-connect-group">
+                            <input type="text" id="ipInput" placeholder="192.168.1.6:5555">
+                            <button class="btn btn-primary" id="connectBtn" title="Connect to IP">
+                                <i class="fa-solid fa-wifi"></i> Connect
+                            </button>
+                        </div>
+                    </div>
+
+                    <div style="border-top: 1px solid var(--border-color); padding-top: 8px;">
+                        <label class="input-label">Pairing Code (6-digit)</label>
+                        <div class="ip-connect-group" style="margin-bottom: 8px;">
+                            <input type="text" id="pairCodeInput" placeholder="6-digit code">
+                            <button class="btn btn-secondary" id="pairBtn" title="Pair Device">
+                                <i class="fa-solid fa-key"></i> Pair
+                            </button>
+                        </div>
+                        <button class="btn btn-secondary" id="pairConnectBtn" style="width: 100%;">
+                            <i class="fa-solid fa-link"></i> Pair + Connect
                         </button>
                     </div>
-                    <button class="btn btn-secondary usb-scan-btn" id="usbBtn">
+
+                    <button class="btn btn-secondary usb-scan-btn" id="usbBtn" style="margin-top: 5px;">
                         <i class="fa-solid fa-usb"></i> Scan USB Devices
                     </button>
                 </div>
@@ -60,21 +96,59 @@
             <div class="device-discovery-panel">
                 <div class="discovery-header">
                     <div class="sidebar-title">Target Devices</div>
-                    <button class="btn btn-secondary discovery-small-btn" id="refreshDevicesBtn" title="Refresh Devices List">
+                    <button class="btn btn-secondary discovery-small-btn" id="refreshDevicesBtn"
+                        title="Refresh Devices List">
                         <i class="fa-solid fa-rotate"></i>
                     </button>
                 </div>
-                
+
                 <div class="discovery-actions" style="margin-bottom: 10px;">
                     <button class="btn btn-secondary discovery-small-btn btn-fill" id="selectAllBtn">Select All</button>
-                    <button class="btn btn-secondary discovery-small-btn btn-fill" id="unselectAllBtn">Clear All</button>
+                    <button class="btn btn-secondary discovery-small-btn btn-fill" id="unselectAllBtn">Clear
+                        All</button>
                 </div>
 
                 <div class="devices-checklist-container" id="devicesChecklist">
                     <!-- Dynamic devices checklist injected here -->
-                    <div style="text-align: center; color: var(--text-muted); font-size: 12px; margin-top: 20px;">
+                    <div style="text-align: center; color: var(--text-muted); font-size: 12px; margin-top: 10px;">
                         Scanning connected TVs...
                     </div>
+                </div>
+            </div>
+
+            <!-- One-Click Auto-Setup ADB Panel -->
+            <div class="connection-panel"
+                style="background: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.2); margin-top: 15px;">
+                <div class="sidebar-title" style="color: var(--success); margin-bottom: 6px; font-size: 13px;">
+                    <i class="fa-solid fa-bolt"></i> ADB Auto Setup
+                </div>
+                <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.4;">
+                    Click to download and configure ADB platform tools PATH automatically.
+                </p>
+                <button class="btn btn-success" id="autoSetupAdbBtn" style="width: 100%;">
+                    Setup ADB (One-Click)
+                </button>
+                <div id="adbSetupStatus"
+                    style="font-size: 11px; color: var(--text-muted); margin-top: 6px; text-align: center; font-weight: 500;">
+                    Status: Not started
+                </div>
+            </div>
+
+            <!-- One-Click Auto-Setup Scrcpy Panel -->
+            <div class="connection-panel"
+                style="background: rgba(99, 102, 241, 0.08); border-color: rgba(99, 102, 241, 0.2); margin-top: 10px;">
+                <div class="sidebar-title" style="color: var(--primary); margin-bottom: 6px; font-size: 13px;">
+                    <i class="fa-solid fa-desktop"></i> Screen Mirror Setup
+                </div>
+                <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.4;">
+                    Click to download and configure Scrcpy mirroring tool PATH automatically.
+                </p>
+                <button class="btn btn-primary" id="autoSetupScrcpyBtn" style="width: 100%;">
+                    Setup Scrcpy (One-Click)
+                </button>
+                <div id="scrcpySetupStatus"
+                    style="font-size: 11px; color: var(--text-muted); margin-top: 6px; text-align: center; font-weight: 500;">
+                    Status: Not started
                 </div>
             </div>
 
@@ -97,6 +171,9 @@
                 <button class="tab-btn" data-tab="log">
                     <i class="fa-solid fa-clock-rotate-left"></i> Deployment Log
                 </button>
+                <button class="tab-btn" data-tab="other-setup">
+                    <i class="fa-solid fa-gears"></i> Other Setup
+                </button>
             </div>
 
             <!-- Tabs Panels Content -->
@@ -111,7 +188,8 @@
                             <div class="card-title">
                                 <i class="fa-solid fa-trash-can"></i> Step 1: Remove Bloatware
                             </div>
-                            <div class="card-desc">Uninstall TV bloatware and auto-apply screen sleep/saver optimizations on all selected devices.</div>
+                            <div class="card-desc">Uninstall TV bloatware and auto-apply screen sleep/saver
+                                optimizations on all selected devices.</div>
                             <div class="card-body">
                                 <button class="btn btn-danger" id="bulkCleanupBtn">
                                     <i class="fa-solid fa-broom"></i> Clean Selected Devices
@@ -123,7 +201,8 @@
                             <div class="card-title">
                                 <i class="fa-solid fa-file-export"></i> Step 2: Signage Installer
                             </div>
-                            <div class="card-desc">Select any Android signage APK package and deploy it simultaneously to all selected TVs.</div>
+                            <div class="card-desc">Select any Android signage APK package and deploy it simultaneously
+                                to all selected TVs.</div>
                             <div class="card-body">
                                 <button class="btn btn-primary" id="bulkInstallBtn">
                                     <i class="fa-solid fa-download"></i> Choose & Deploy APK
@@ -135,7 +214,8 @@
                             <div class="card-title">
                                 <i class="fa-solid fa-upload"></i> Step 3: Push Media Files
                             </div>
-                            <div class="card-desc">Transfer videos, images, or assets to the selected TVs main memory storage directory.</div>
+                            <div class="card-desc">Transfer videos, images, or assets to the selected TVs main memory
+                                storage directory.</div>
                             <div class="card-body">
                                 <div class="form-group">
                                     <label class="input-label">Destination Path on Device</label>
@@ -151,14 +231,19 @@
                             <div class="card-title">
                                 <i class="fa-solid fa-gamepad"></i> Step 4: Device orientation
                             </div>
-                            <div class="card-desc">Modify settings and control orientations across selected TV systems.</div>
+                            <div class="card-desc">Modify settings and control orientations across selected TV systems.
+                            </div>
                             <div class="card-body">
                                 <label class="input-label">Orientation Control</label>
                                 <div class="rotation-grid" style="margin-bottom: 12px;">
-                                    <button class="btn btn-secondary bulk-rotate-btn" data-rotation="0">Portrait (0°)</button>
-                                    <button class="btn btn-secondary bulk-rotate-btn" data-rotation="1">Landscape (90°)</button>
-                                    <button class="btn btn-secondary bulk-rotate-btn" data-rotation="2">Rev Portrait (180°)</button>
-                                    <button class="btn btn-secondary bulk-rotate-btn" data-rotation="3">Rev Landscape (270°)</button>
+                                    <button class="btn btn-secondary bulk-rotate-btn" data-rotation="0">Portrait
+                                        (0°)</button>
+                                    <button class="btn btn-secondary bulk-rotate-btn" data-rotation="1">Landscape
+                                        (90°)</button>
+                                    <button class="btn btn-secondary bulk-rotate-btn" data-rotation="2">Rev Portrait
+                                        (180°)</button>
+                                    <button class="btn btn-secondary bulk-rotate-btn" data-rotation="3">Rev Landscape
+                                        (270°)</button>
                                 </div>
                                 <label class="input-label">Reboot Control</label>
                                 <button class="btn btn-danger" id="bulkRebootBtn">
@@ -169,14 +254,50 @@
 
                     </div>
 
+                    <!-- Embedded Command Prompt -->
+                    <!-- Embedded Command Prompt -->
+                    <div class="terminal-row">
+                        <div class="card terminal-card">
+                            <div class="card-title">
+                                <i class="fa-solid fa-terminal"></i> Embedded Command Prompt
+                            </div>
+                            <div class="card-desc">Type and execute manual ADB or system command lines on the selected
+                                devices.</div>
+                            <div class="card-body">
+                                <div class="terminal-input-col">
+                                    <div>
+                                        <label class="input-label" id="terminalTargetLabel">Target: No devices selected
+                                            (Select sidebar checkboxes)</label>
+                                        <input type="text" id="terminalInput"
+                                            placeholder="Type command (e.g., shell getprop ro.product.model)..."
+                                            style="font-family: monospace;">
+                                    </div>
+                                    <button class="btn btn-primary" id="terminalSendBtn" style="width: 100%;">
+                                        <i class="fa-solid fa-play"></i> Run Command
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card terminal-card">
+                            <div class="card-title">
+                                <i class="fa-solid fa-square-poll-horizontal"></i> Console Output
+                            </div>
+                            <div class="card-desc">Real-time status and execution logs from target devices.</div>
+                            <div class="card-body">
+                                <div id="terminalOutput">> Ready. Select devices from sidebar and run commands.</div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Alert message box for logs -->
-                    <div class="alert-box" id="statusBox"></div>
+                    <div class="alert-box" id="statusBox" style="width: 48%;"></div>
 
                 </div>
 
                 <!-- 2. FILE MANAGER TAB -->
                 <div class="tab-panel" id="panel-file">
-                    
+
                     <div class="file-manager-toolbar">
                         <div class="file-manager-path-section">
                             <select id="fileManagerDeviceSelect" class="device-dropdown">
@@ -213,7 +334,8 @@
                             </thead>
                             <tbody id="fileManagerBody">
                                 <tr>
-                                    <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                                    <td colspan="5"
+                                        style="text-align: center; color: var(--text-muted); padding: 40px 0;">
                                         Select a connected TV device from the dropdown to browse its storage.
                                     </td>
                                 </tr>
@@ -225,13 +347,14 @@
 
                 <!-- 3. INSTALLED APPLICATIONS TAB -->
                 <div class="tab-panel" id="panel-apps">
-                    
+
                     <div class="apps-manager-toolbar">
                         <div class="search-app-group">
                             <select id="appsDeviceSelect" class="device-dropdown">
                                 <option value="">-- Select Target Device --</option>
                             </select>
-                            <input type="search" id="appsSearchInput" placeholder="Search application packages..." disabled>
+                            <input type="search" id="appsSearchInput" placeholder="Search application packages..."
+                                disabled>
                         </div>
                         <div class="btn-row">
                             <button class="btn btn-primary" id="appsRefreshBtn" disabled>
@@ -247,7 +370,8 @@
                         <table id="appsTable">
                             <thead>
                                 <tr>
-                                    <th style="width: 40px; text-align: center;"><input type="checkbox" id="appsSelectAllCheck" disabled></th>
+                                    <th style="width: 40px; text-align: center;"><input type="checkbox"
+                                            id="appsSelectAllCheck" disabled></th>
                                     <th>Application Name</th>
                                     <th>Package Name</th>
                                     <th style="width: 150px; text-align: right;">Action</th>
@@ -255,7 +379,8 @@
                             </thead>
                             <tbody id="appsBody">
                                 <tr>
-                                    <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                                    <td colspan="4"
+                                        style="text-align: center; color: var(--text-muted); padding: 40px 0;">
                                         Select a connected TV device from the dropdown to list its applications.
                                     </td>
                                 </tr>
@@ -268,8 +393,10 @@
                 <!-- 4. DEPLOYMENT PROGRESS LOG TAB -->
                 <div class="tab-panel" id="panel-log">
 
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <span style="font-size: 13px; color: var(--text-muted);">Deployment log history for this session</span>
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <span style="font-size: 13px; color: var(--text-muted);">Deployment log history for this
+                            session</span>
                         <button class="btn btn-secondary discovery-small-btn" id="clearLogsBtn">
                             <i class="fa-solid fa-trash"></i> Clear Log Table
                         </button>
@@ -287,7 +414,8 @@
                             </thead>
                             <tbody id="logsBody">
                                 <tr>
-                                    <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                                    <td colspan="4"
+                                        style="text-align: center; color: var(--text-muted); padding: 40px 0;">
                                         No deployments performed yet. Trigger bulk actions to see status.
                                     </td>
                                 </tr>
@@ -297,10 +425,290 @@
 
                 </div>
 
+                <!-- 5. OTHER SETUP TAB -->
+                <div class="tab-panel" id="panel-other-setup">
+                    <div class="other-setup-grid">
+
+                        <!-- Left Column: Signage Setup Checklist -->
+                        <div class="card setup-checklist-card">
+                            <div class="card-title">
+                                <i class="fa-solid fa-list-check"></i> Signage Setup Checklist
+                            </div>
+                            <div class="card-desc">Follow and mark off these sequential steps for configuring signage on
+                                target devices.</div>
+
+                            <!-- Progress Bar -->
+                            <div class="progress-container">
+                                <div class="progress-bar-label">
+                                    <span>Setup Progress</span>
+                                    <span id="checklistProgressText">0% (0 of 17 completed)</span>
+                                </div>
+                                <div class="progress-bar-bg">
+                                    <div class="progress-bar-fill" id="checklistProgressBar" style="width: 0%;"></div>
+                                </div>
+                            </div>
+
+                            <div class="checklist-actions"
+                                style="margin: 15px 0; display: flex; justify-content: flex-end;">
+                                <button class="btn btn-secondary discovery-small-btn" id="resetChecklistBtn">
+                                    <i class="fa-solid fa-rotate-left"></i> Reset Checklist
+                                </button>
+                            </div>
+
+                            <div class="checklist-items" id="setupChecklistItems">
+                                <!-- Step 1 -->
+                                <div class="checklist-item" data-index="1">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-1">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">1.</span> Signage ON</span>
+                                    </label>
+                                </div>
+                                <!-- Step 2 -->
+                                <div class="checklist-item" data-index="2">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-2">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">2.</span> ADB/developer option
+                                            enabled</span>
+                                    </label>
+                                </div>
+                                <!-- Step 3 -->
+                                <div class="checklist-item" data-index="3">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-3">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">3.</span> Power mode ON from
+                                            service menu</span>
+                                    </label>
+                                </div>
+                                <!-- Step 4 -->
+                                <div class="checklist-item" data-index="4">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-4">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">4.</span> Screen orientation
+                                            90</span>
+                                    </label>
+                                </div>
+                                <!-- Step 5 -->
+                                <div class="checklist-item" data-index="5">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-5">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">5.</span> Hotel mode ON</span>
+                                    </label>
+                                </div>
+                                <!-- Step 6 -->
+                                <div class="checklist-item" data-index="6">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-6">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">6.</span> Setting/time all timer
+                                            settings OFF</span>
+                                    </label>
+                                </div>
+                                <!-- Step 7 -->
+                                <div class="checklist-item" data-index="7">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-7">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">7.</span> Source/HDMI1/menu all
+                                            timer OFF</span>
+                                    </label>
+                                </div>
+                                <!-- Step 8 -->
+                                <div class="checklist-item" data-index="8">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-8">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">8.</span> Clean all from
+                                            controlSystem</span>
+                                    </label>
+                                </div>
+                                <!-- Step 9 -->
+                                <div class="checklist-item" data-index="9">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-9">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">9.</span> Rotate screen</span>
+                                    </label>
+                                </div>
+                                <!-- Step 10 -->
+                                <div class="checklist-item" data-index="10">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-10">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">10.</span> Install APK:
+                                            signage.apk, cx file.apk</span>
+                                    </label>
+                                </div>
+                                <!-- Step 11 -->
+                                <div class="checklist-item" data-index="11">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-11">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">11.</span> File access related
+                                            all permissions ON from TV</span>
+                                    </label>
+                                </div>
+                                <!-- Step 12 -->
+                                <div class="checklist-item" data-index="12">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-12">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">12.</span> Display over on from
+                                            TV</span>
+                                    </label>
+                                </div>
+                                <!-- Step 13 -->
+                                <div class="checklist-item" data-index="13">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-13">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">13.</span> Auto-start ON from
+                                            TV</span>
+                                    </label>
+                                </div>
+                                <!-- Step 14 -->
+                                <div class="checklist-item" data-index="14">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-14">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">14.</span> Signage.apk activate &
+                                            upload file</span>
+                                    </label>
+                                </div>
+                                <!-- Step 15 -->
+                                <div class="checklist-item" data-index="15">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-15">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">15.</span> Other package
+                                            uninstall or disabled</span>
+                                    </label>
+                                </div>
+                                <!-- Step 16 -->
+                                <div class="checklist-item" data-index="16">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-16">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">16.</span> Reboot from
+                                            controlSystem</span>
+                                    </label>
+                                </div>
+                                <!-- Step 17 -->
+                                <div class="checklist-item" data-index="17">
+                                    <label class="checkbox-container">
+                                        <input type="checkbox" id="step-17">
+                                        <span class="checkmark"></span>
+                                        <span class="step-text"><span class="step-num">17.</span> All functionality test
+                                            and pack</span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Column: Open Factory Menu shortcuts -->
+                        <div class="card factory-codes-card">
+                            <div class="card-title">
+                                <i class="fa-solid fa-toolbox"></i> Open Factory Menu Shortcuts
+                            </div>
+                            <div class="card-desc">Click the Copy button beside any sequence.</div>
+
+                            <div class="factory-codes-list">
+                                <div class="factory-code-card">
+                                    <div class="factory-code-header">
+                                        <span class="tv-model">Google TV</span>
+                                        <button class="btn btn-secondary copy-code-btn"
+                                            data-clipboard="Home → INPUT → LEFT → RIGHT → LEFT → RIGHT → BACK"
+                                            title="Copy code sequence">
+                                            <i class="fa-solid fa-copy"></i> Copy
+                                        </button>
+                                    </div>
+                                    <div class="factory-code-sequence">Home → INPUT → LEFT → RIGHT → LEFT → RIGHT → BACK
+                                    </div>
+                                </div>
+
+                                <div class="factory-code-card">
+                                    <div class="factory-code-header">
+                                        <span class="tv-model">Google TV 43, 55</span>
+                                        <button class="btn btn-secondary copy-code-btn"
+                                            data-clipboard="INPUT → LEFT → LEFT → UP → DOWN" title="Copy code sequence">
+                                            <i class="fa-solid fa-copy"></i> Copy
+                                        </button>
+                                    </div>
+                                    <div class="factory-code-sequence">INPUT → LEFT → LEFT → UP → DOWN</div>
+                                </div>
+
+                                <div class="factory-code-card">
+                                    <div class="factory-code-header">
+                                        <span class="tv-model">Smart TV</span>
+                                        <button class="btn btn-secondary copy-code-btn"
+                                            data-clipboard="MENU → 1 → 1 → 4 → 7" title="Copy code sequence">
+                                            <i class="fa-solid fa-copy"></i> Copy
+                                        </button>
+                                    </div>
+                                    <div class="factory-code-sequence">MENU → 1 → 1 → 4 → 7</div>
+                                </div>
+
+                                <div class="factory-code-card">
+                                    <div class="factory-code-header">
+                                        <span class="tv-model">GTV</span>
+                                        <button class="btn btn-secondary copy-code-btn"
+                                            data-clipboard="INPUT → LEFT → LEFT → UP → RIGHT"
+                                            title="Copy code sequence">
+                                            <i class="fa-solid fa-copy"></i> Copy
+                                        </button>
+                                    </div>
+                                    <div class="factory-code-sequence">INPUT → LEFT → LEFT → UP → RIGHT</div>
+                                </div>
+
+                                <div class="factory-code-card">
+                                    <div class="factory-code-header">
+                                        <span class="tv-model">GTV Alternate 1</span>
+                                        <button class="btn btn-secondary copy-code-btn"
+                                            data-clipboard="Home → 1 → 1 → 0 → 5 → OK" title="Copy code sequence">
+                                            <i class="fa-solid fa-copy"></i> Copy
+                                        </button>
+                                    </div>
+                                    <div class="factory-code-sequence">Home → 1 → 1 → 0 → 5 → OK</div>
+                                </div>
+
+                                <div class="factory-code-card">
+                                    <div class="factory-code-header">
+                                        <span class="tv-model">GTV Alternate 2</span>
+                                        <button class="btn btn-secondary copy-code-btn"
+                                            data-clipboard="UP → DOWN → LEFT → RIGHT → OK" title="Copy code sequence">
+                                            <i class="fa-solid fa-copy"></i> Copy
+                                        </button>
+                                    </div>
+                                    <div class="factory-code-sequence">UP → DOWN → LEFT → RIGHT → OK</div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
             </div>
 
         </main>
 
+    </div>
+
+    <!-- Custom Center Alert Popup -->
+    <div class="custom-alert-overlay" id="customAlertOverlay">
+        <div class="custom-alert-box" id="customAlertBox">
+            <div class="custom-alert-icon" id="customAlertIcon">
+                <i class="fa-solid fa-circle-check"></i>
+            </div>
+            <div class="custom-alert-content">
+                <h4 id="customAlertTitle">Success</h4>
+                <p id="customAlertMessage">Done</p>
+            </div>
+            <button class="custom-alert-close" id="customAlertCloseBtn">&times;</button>
+        </div>
     </div>
 
     <!-- Frontend controller logic scripts -->

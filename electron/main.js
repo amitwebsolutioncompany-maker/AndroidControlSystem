@@ -218,3 +218,56 @@ ipcMain.handle("apps-list", async (event, { deviceId }) => {
 ipcMain.handle("apps-uninstall", async (event, { deviceId, packageName }) => {
     return await adb.uninstallApp(deviceId, packageName);
 });
+
+// Disable package
+ipcMain.handle("apps-disable", async (event, { deviceId, packageName }) => {
+    return await adb.disableApp(deviceId, packageName);
+});
+
+// Wireless pairing handler
+ipcMain.handle("connect-pair", async (event, { ipport, code }) => {
+    return await adb.pairDevice(ipport, code);
+});
+
+// Auto ADB setup handler
+ipcMain.handle("auto-setup-adb", async () => {
+    return await adb.autoSetupADB();
+});
+
+// Manual command runner handler
+ipcMain.handle("run-manual-command", async (event, { command, deviceIds }) => {
+    if (!deviceIds || deviceIds.length === 0) {
+        return await adb.runManualCommand(command);
+    }
+    const results = await Promise.all(
+        deviceIds.map(async (id) => {
+            try {
+                const r = await adb.runManualCommand(command, id);
+                return { deviceId: id, success: r.success, stdout: r.stdout, stderr: r.stderr };
+            } catch (e) {
+                return { deviceId: id, success: false, error: String(e) };
+            }
+        })
+    );
+    return { success: true, results };
+});
+
+// Start Screen Mirroring & Control (scrcpy)
+ipcMain.handle("start-scrcpy", async (event, { deviceId, deviceName }) => {
+    return await adb.startScrcpy(deviceId, deviceName);
+});
+
+// Auto Scrcpy setup handler
+ipcMain.handle("auto-setup-scrcpy", async () => {
+    return await adb.autoSetupScrcpy();
+});
+
+// Start ADB Server handler
+ipcMain.handle("start-adb-server", async () => {
+    return await adb.startAdbServer();
+});
+
+// Kill ADB Server handler
+ipcMain.handle("kill-adb-server", async () => {
+    return await adb.killAdbServer();
+});

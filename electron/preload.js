@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld("api", {
     connectWifi: (ip) => ipcRenderer.invoke("connect-wifi", ip),
     checkUsb: () => ipcRenderer.invoke("check-usb"),
     getDevicesDetails: () => ipcRenderer.invoke("get-devices-details"),
+    pairDevice: (ipport, code) => ipcRenderer.invoke("connect-pair", { ipport, code }),
+    autoSetupADB: () => ipcRenderer.invoke("auto-setup-adb"),
 
     // Bulk Control APIs
     bulkInstall: (deviceIds, apkPath) => ipcRenderer.invoke("bulk-install", { deviceIds, apkPath }),
@@ -23,5 +25,17 @@ contextBridge.exposeInMainWorld("api", {
 
     // Apps Manager APIs
     appsList: (deviceId) => ipcRenderer.invoke("apps-list", { deviceId }),
-    appsUninstall: (deviceId, packageName) => ipcRenderer.invoke("apps-uninstall", { deviceId, packageName })
+    appsUninstall: (deviceId, packageName) => ipcRenderer.invoke("apps-uninstall", { deviceId, packageName }),
+    appsDisable: (deviceId, packageName) => ipcRenderer.invoke("apps-disable", { deviceId, packageName }),
+
+    // Screen Mirroring APIs
+    startScrcpy: (deviceId, deviceName) => ipcRenderer.invoke("start-scrcpy", { deviceId, deviceName }),
+    autoSetupScrcpy: () => ipcRenderer.invoke("auto-setup-scrcpy"),
+
+    // ADB Server APIs
+    startAdbServer: () => ipcRenderer.invoke("start-adb-server"),
+    killAdbServer: () => ipcRenderer.invoke("kill-adb-server"),
+
+    // Manual Command Executor
+    runManualCommand: (command, deviceIds) => ipcRenderer.invoke("run-manual-command", { command, deviceIds })
 });

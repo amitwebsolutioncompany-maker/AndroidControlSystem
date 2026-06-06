@@ -21,6 +21,20 @@ const tabPanels = document.querySelectorAll(".tab-panel");
 const ipInput = document.getElementById("ipInput");
 const connectBtn = document.getElementById("connectBtn");
 const usbBtn = document.getElementById("usbBtn");
+const pairCodeInput = document.getElementById("pairCodeInput");
+const pairBtn = document.getElementById("pairBtn");
+const pairConnectBtn = document.getElementById("pairConnectBtn");
+
+// Sidebar Setup Panel
+const autoSetupAdbBtn = document.getElementById("autoSetupAdbBtn");
+const adbSetupStatus = document.getElementById("adbSetupStatus");
+const autoSetupScrcpyBtn = document.getElementById("autoSetupScrcpyBtn");
+const scrcpySetupStatus = document.getElementById("scrcpySetupStatus");
+
+// Header Navbar controls
+const startAdbServerBtn = document.getElementById("startAdbServerBtn");
+const killAdbServerBtn = document.getElementById("killAdbServerBtn");
+const refreshDevicesHeaderBtn = document.getElementById("refreshDevicesHeaderBtn");
 
 // Sidebar Devices checklist
 const refreshDevicesBtn = document.getElementById("refreshDevicesBtn");
@@ -37,7 +51,31 @@ const bulkRotateButtons = document.querySelectorAll(".bulk-rotate-btn");
 const bulkRebootBtn = document.getElementById("bulkRebootBtn");
 const statusBox = document.getElementById("statusBox");
 
-// File Manager Tab
+// Embedded Terminal Controls
+const terminalInput = document.getElementById("terminalInput");
+const terminalSendBtn = document.getElementById("terminalSendBtn");
+const terminalOutput = document.getElementById("terminalOutput");
+const terminalTargetLabel = document.getElementById("terminalTargetLabel");
+
+function updateTerminalTargetLabel() {
+    if (!terminalTargetLabel) return;
+    const count = selectedDeviceIds.size;
+    if (count === 0) {
+        terminalTargetLabel.textContent = "Target: No devices selected (Select sidebar checkboxes)";
+        terminalTargetLabel.style.color = "var(--danger)";
+    } else {
+        terminalTargetLabel.textContent = `Target: ${count} selected device(s)`;
+        terminalTargetLabel.style.color = "var(--success)";
+    }
+}
+
+// Loading state helper
+const bulkInteractiveElements = [
+    ipInput, connectBtn, usbBtn, refreshDevicesBtn, selectAllBtn, unselectAllBtn,
+    bulkCleanupBtn, bulkInstallBtn, bulkPushBtn, bulkRebootBtn, ...bulkRotateButtons,
+    pairCodeInput, pairBtn, pairConnectBtn, autoSetupAdbBtn, autoSetupScrcpyBtn, terminalInput, terminalSendBtn,
+    startAdbServerBtn, killAdbServerBtn, refreshDevicesHeaderBtn
+];
 const fileManagerDeviceSelect = document.getElementById("fileManagerDeviceSelect");
 const fileManagerUpBtn = document.getElementById("fileManagerUpBtn");
 const fileManagerPathInput = document.getElementById("fileManagerPathInput");
@@ -59,10 +97,6 @@ const logsBody = document.getElementById("logsBody");
 const clearLogsBtn = document.getElementById("clearLogsBtn");
 
 // --- INTERACTIVE CONTROLS LOCK HELPER ---
-const bulkInteractiveElements = [
-    ipInput, connectBtn, usbBtn, refreshDevicesBtn, selectAllBtn, unselectAllBtn,
-    bulkCleanupBtn, bulkInstallBtn, bulkPushBtn, bulkRebootBtn, ...bulkRotateButtons
-];
 
 function setBulkControlsLock(locked) {
     bulkInteractiveElements.forEach(el => {
@@ -117,7 +151,7 @@ document.addEventListener("DOMContentLoaded", () => {
     tabButtons.forEach(btn => {
         btn.addEventListener("click", () => {
             const targetTab = btn.getAttribute("data-tab");
-            
+
             // Toggle active classes
             tabButtons.forEach(b => b.classList.remove("active"));
             btn.classList.add("active");
@@ -130,6 +164,10 @@ document.addEventListener("DOMContentLoaded", () => {
     // 4. Device Discovery Poll
     pollDevices();
     setInterval(pollDevices, 5000);
+
+    // 5. Initialize signage checklist & factory menu copy actions
+    initChecklist();
+    initFactoryCodeCopyButtons();
 });
 
 // Theme switcher event
@@ -148,7 +186,7 @@ themeToggleBtn.addEventListener("click", () => {
 function logDeployment(deviceId, operation, statusDetails, isSuccess) {
     const now = new Date();
     const timeStr = now.toTimeString().split(' ')[0];
-    
+
     // Get device name/nickname
     const dev = connectedDevices.find(d => d.id === deviceId);
     const deviceName = dev ? dev.name : deviceId;
@@ -207,7 +245,7 @@ async function pollDevices() {
 
         // Render Sidebar checklist
         renderDevicesChecklist();
-        
+
         // Refresh Device Selector Dropdowns
         refreshDeviceDropdowns();
     } catch (err) {
@@ -223,6 +261,7 @@ function renderDevicesChecklist() {
             </div>
         `;
         selectedDeviceIds.clear();
+        updateTerminalTargetLabel();
         return;
     }
 
@@ -231,6 +270,12 @@ function renderDevicesChecklist() {
         const connectionBadgeClass = dev.type === "Wi-Fi" ? "badge-wifi" : "badge-usb";
         const statusBadgeClass = dev.status === "Online" ? "badge-online" : "badge-offline";
         const checkboxDisabled = dev.status !== "Online" ? "disabled" : "";
+
+        const controlBtn = dev.status === "Online" ? `
+            <button class="btn btn-primary discovery-small-btn" onclick="startRemoteControl('${dev.id}', '${dev.name.replace(/'/g, "\\'")}')" title="Show screen and control device" style="padding: 2px 6px; height: 18px; font-size: 9px; margin-top: 2px; border-radius: 4px; gap: 4px;">
+                <i class="fa-solid fa-desktop" style="font-size: 9px;"></i> Control
+            </button>
+        ` : '';
 
         return `
             <div class="device-item">
@@ -242,8 +287,11 @@ function renderDevicesChecklist() {
                     </div>
                 </div>
                 <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-                    <span class="badge ${connectionBadgeClass}">${dev.type}</span>
-                    <span class="badge ${statusBadgeClass}">${dev.status}</span>
+                    <div style="display: flex; gap: 4px;">
+                        <span class="badge ${connectionBadgeClass}">${dev.type}</span>
+                        <span class="badge ${statusBadgeClass}">${dev.status}</span>
+                    </div>
+                    ${controlBtn}
                 </div>
             </div>
         `;
@@ -259,8 +307,10 @@ function renderDevicesChecklist() {
             } else {
                 selectedDeviceIds.delete(devId);
             }
+            updateTerminalTargetLabel();
         });
     });
+    updateTerminalTargetLabel();
 }
 
 function refreshDeviceDropdowns() {
@@ -371,6 +421,191 @@ usbBtn.addEventListener("click", async () => {
         setBulkControlsLock(false);
     }
 });
+
+// Pair Device over wireless debugging
+pairBtn.addEventListener("click", async () => {
+    const ipport = ipInput.value.trim();
+    const code = pairCodeInput.value.trim();
+    if (!ipport || !code) {
+        showStatus("Please enter both Device IP & Port (e.g. 192.168.1.6:45283) and 6-digit Pairing Code first.", "error");
+        return;
+    }
+
+    setBulkControlsLock(true);
+    showStatus(`Pairing with ${ipport} using code ${code}...`, "info");
+
+    try {
+        const result = await window.api.pairDevice(ipport, code);
+        if (result.success) {
+            showStatus(`Successfully paired to ${ipport}!\n${result.message}`, "success");
+            pairCodeInput.value = "";
+        } else {
+            showStatus(`Pairing failed:\n${result.error}`, "error");
+        }
+    } catch (err) {
+        showStatus(`Pairing error: ${err.message || err}`, "error");
+    } finally {
+        await pollDevices();
+        setBulkControlsLock(false);
+    }
+});
+
+// Pair + Connect wireless debugging flow
+pairConnectBtn.addEventListener("click", async () => {
+    const ipport = ipInput.value.trim();
+    const code = pairCodeInput.value.trim();
+    if (!ipport || !code) {
+        showStatus("Please enter both Device IP & Port and 6-digit Pairing Code first.", "error");
+        return;
+    }
+
+    setBulkControlsLock(true);
+    showStatus(`Step 1/2: Pairing with ${ipport}...`, "info");
+
+    try {
+        const pairResult = await window.api.pairDevice(ipport, code);
+        if (!pairResult.success) {
+            showStatus(`Pairing failed:\n${pairResult.error}`, "error");
+            setBulkControlsLock(false);
+            return;
+        }
+
+        const ip = ipport.split(":")[0];
+        showStatus(`Step 2/2: Pairing successful! Connecting to TV at ${ip}...`, "info");
+
+        const connResult = await window.api.connectWifi(ip);
+        if (connResult.success) {
+            showStatus(`Pairing & Connection Successful!\nConnected to TV at ${ip}:5555`, "success");
+            pairCodeInput.value = "";
+            await pollDevices();
+            const newDev = connectedDevices.find(d => d.id.includes(ip));
+            if (newDev) selectedDeviceIds.add(newDev.id);
+        } else {
+            showStatus(`Pairing succeeded, but connect failed: ${connResult.error}\nTry connecting manually using 'Connect' button.`, "warning");
+        }
+    } catch (err) {
+        showStatus(`Pair & Connect error: ${err.message || err}`, "error");
+    } finally {
+        await pollDevices();
+        setBulkControlsLock(false);
+    }
+});
+
+// Auto-Setup ADB One-click installer
+autoSetupAdbBtn.addEventListener("click", async () => {
+    setBulkControlsLock(true);
+    adbSetupStatus.textContent = "Status: Installing ADB...";
+    adbSetupStatus.style.color = "var(--text-muted)";
+    showStatus("Initializing ADB Auto Setup on Windows host. Please wait...", "info");
+
+    try {
+        const result = await window.api.autoSetupADB();
+        if (result.success) {
+            adbSetupStatus.textContent = "Status: Setup Completed!";
+            adbSetupStatus.style.color = "var(--success)";
+            showStatus(`ADB Auto-Setup Completed Successfully!\n${result.message}`, "success");
+        } else {
+            adbSetupStatus.textContent = "Status: Setup Failed";
+            adbSetupStatus.style.color = "var(--danger)";
+            showStatus(`ADB Auto-Setup Failed:\n${result.error}`, "error");
+        }
+    } catch (err) {
+        adbSetupStatus.textContent = "Status: Error occurred";
+        adbSetupStatus.style.color = "var(--danger)";
+        showStatus(`ADB Setup Error: ${err.message || err}`, "error");
+    } finally {
+        setBulkControlsLock(false);
+    }
+});
+
+// Auto-Setup Scrcpy One-click installer
+if (autoSetupScrcpyBtn) {
+    autoSetupScrcpyBtn.addEventListener("click", async () => {
+        setBulkControlsLock(true);
+        scrcpySetupStatus.textContent = "Status: Installing Scrcpy...";
+        scrcpySetupStatus.style.color = "var(--text-muted)";
+        showStatus("Downloading and setting up Scrcpy. Please wait...", "info");
+
+        try {
+            const result = await window.api.autoSetupScrcpy();
+            if (result.success) {
+                scrcpySetupStatus.textContent = "Status: Setup Completed!";
+                scrcpySetupStatus.style.color = "var(--success)";
+                showStatus(`Scrcpy Setup Completed Successfully!\n${result.message}`, "success");
+            } else {
+                scrcpySetupStatus.textContent = "Status: Setup Failed";
+                scrcpySetupStatus.style.color = "var(--danger)";
+                showStatus(`Scrcpy Setup Failed:\n${result.error}`, "error");
+            }
+        } catch (err) {
+            scrcpySetupStatus.textContent = "Status: Error occurred";
+            scrcpySetupStatus.style.color = "var(--danger)";
+            showStatus(`Scrcpy Setup Error: ${err.message || err}`, "error");
+        } finally {
+            setBulkControlsLock(false);
+        }
+    });
+}
+
+// Remote Control Screen Mirror launcher
+window.startRemoteControl = async function(deviceId, deviceName) {
+    showStatus(`Launching screen mirroring for ${deviceName || deviceId}...`, "info");
+    try {
+        const result = await window.api.startScrcpy(deviceId, deviceName);
+        if (result.success) {
+            showStatus(`Screen mirroring launched for ${deviceName || deviceId}!`, "success");
+        } else {
+            showStatus(`Mirroring failed: ${result.error}`, "error");
+            alert(`Could not start remote control:\n\n${result.error}`);
+        }
+    } catch (err) {
+        showStatus(`Mirroring error: ${err.message}`, "error");
+    }
+};
+
+// ADB Server Controls bindings
+if (startAdbServerBtn) {
+    startAdbServerBtn.addEventListener("click", async () => {
+        showStatus("Starting ADB Server...", "info");
+        try {
+            const res = await window.api.startAdbServer();
+            if (res.success) {
+                showStatus(res.message, "success");
+                await pollDevices();
+            } else {
+                showStatus(`Failed to start ADB Server: ${res.error}`, "error");
+            }
+        } catch (err) {
+            showStatus(`Error: ${err.message}`, "error");
+        }
+    });
+}
+
+if (killAdbServerBtn) {
+    killAdbServerBtn.addEventListener("click", async () => {
+        showStatus("Killing ADB Server...", "warning");
+        try {
+            const res = await window.api.killAdbServer();
+            if (res.success) {
+                showStatus(res.message, "success");
+                await pollDevices();
+            } else {
+                showStatus(`Failed to kill ADB Server: ${res.error}`, "error");
+            }
+        } catch (err) {
+            showStatus(`Error: ${err.message}`, "error");
+        }
+    });
+}
+
+if (refreshDevicesHeaderBtn) {
+    refreshDevicesHeaderBtn.addEventListener("click", async () => {
+        refreshDevicesHeaderBtn.disabled = true;
+        showStatus("Polling connected devices...", "info");
+        await pollDevices();
+        refreshDevicesHeaderBtn.disabled = false;
+    });
+}
 
 // --- BULK OPERATIONS TAB CONTROLS ---
 
@@ -623,7 +858,7 @@ async function loadFilesList() {
         const result = await window.api.fileManagerList(activeFileManagerDevice, currentPath);
         if (result.success) {
             setFileManagerControlsEnabled(true);
-            
+
             // Enable/disable UP button based on root
             fileManagerUpBtn.disabled = currentPath === "" || currentPath === "/";
 
@@ -637,7 +872,7 @@ async function loadFilesList() {
                 const icon = item.isDir ? "fa-folder" : "fa-file";
                 const iconColor = item.isDir ? "#f59e0b" : "#94a3b8";
                 const sizeLabel = item.isDir ? "--" : formatBytes(item.size);
-                
+
                 const trClass = item.isDir ? "style='cursor: pointer; font-weight: 500;'" : "";
                 const dbClickAttr = item.isDir ? `ondblclick="navigateFolder('${item.name}')"` : "";
 
@@ -670,7 +905,7 @@ async function loadFilesList() {
 }
 
 // Navigation helpers exposed globally so ondblclick can trigger them
-window.navigateFolder = function(folderName) {
+window.navigateFolder = function (folderName) {
     // Remove double slashes
     if (currentPath === "/") {
         currentPath = "/" + folderName;
@@ -684,7 +919,7 @@ window.navigateFolder = function(folderName) {
 // Back Up Navigation
 fileManagerUpBtn.addEventListener("click", () => {
     if (currentPath === "" || currentPath === "/") return;
-    
+
     const parts = currentPath.split("/");
     parts.pop();
     currentPath = parts.join("/") || "/";
@@ -727,7 +962,7 @@ fileManagerMkdirBtn.addEventListener("click", async () => {
 // Upload File
 fileManagerUploadBtn.addEventListener("click", async () => {
     if (!activeFileManagerDevice) return;
-    
+
     fileManagerUploadBtn.disabled = true;
     try {
         const result = await window.api.fileManagerUpload(activeFileManagerDevice, currentPath);
@@ -744,7 +979,7 @@ fileManagerUploadBtn.addEventListener("click", async () => {
 });
 
 // Download File (Global handler)
-window.downloadFileManagerFile = async function(fileName) {
+window.downloadFileManagerFile = async function (fileName) {
     if (!activeFileManagerDevice) return;
     const remotePath = currentPath === "/" ? `/${fileName}` : `${currentPath}/${fileName}`;
 
@@ -761,7 +996,7 @@ window.downloadFileManagerFile = async function(fileName) {
 };
 
 // Delete File/Folder (Global handler)
-window.deleteFileManagerItem = async function(itemName, isDir) {
+window.deleteFileManagerItem = async function (itemName, isDir) {
     if (!activeFileManagerDevice) return;
     const targetPath = currentPath === "/" ? `/${itemName}` : `${currentPath}/${itemName}`;
 
@@ -782,10 +1017,10 @@ window.deleteFileManagerItem = async function(itemName, isDir) {
 };
 
 // Rename File/Folder (Global handler)
-window.renameFileManagerItem = async function(itemName) {
+window.renameFileManagerItem = async function (itemName) {
     if (!activeFileManagerDevice) return;
     const oldPath = currentPath === "/" ? `/${itemName}` : `${currentPath}/${itemName}`;
-    
+
     const newName = prompt(`Rename "${itemName}" to:`, itemName);
     if (!newName || !newName.trim() || newName.trim() === itemName) return;
 
@@ -881,7 +1116,10 @@ function renderAppsRows(apps) {
                 </td>
                 <td><strong>${app.friendlyName}</strong></td>
                 <td style="font-family: monospace; font-size: 12px; color: var(--text-muted);">${app.packageName}</td>
-                <td style="text-align: right;">
+                <td style="text-align: right; display: flex;">
+                    <button class="btn btn-warning discovery-small-btn" onclick="disableSingleApp('${app.packageName}')" style="margin-right: 5px;">
+                        <i class="fa-solid fa-ban"></i> Disable
+                    </button>
                     <button class="btn btn-danger discovery-small-btn" onclick="uninstallSingleApp('${app.packageName}')">
                         <i class="fa-solid fa-trash"></i> Uninstall
                     </button>
@@ -934,7 +1172,7 @@ appsSelectAllCheck.addEventListener("change", (e) => {
 });
 
 // Uninstall Single App
-window.uninstallSingleApp = async function(packageName) {
+window.uninstallSingleApp = async function (packageName) {
     if (!activeAppsDevice) return;
 
     if (!confirm(`Are you sure you want to uninstall this application package from the TV?\nPackage: ${packageName}`)) {
@@ -959,10 +1197,36 @@ window.uninstallSingleApp = async function(packageName) {
     }
 };
 
+// Disable Single App
+window.disableSingleApp = async function (packageName) {
+    if (!activeAppsDevice) return;
+
+    if (!confirm(`Are you sure you want to DISABLE this application package on the TV?\nPackage: ${packageName}`)) {
+        return;
+    }
+
+    setAppsManagerControlsEnabled(false);
+    showStatus(`Disabling package ${packageName} on active TV...`, "info");
+
+    try {
+        const result = await window.api.appsDisable(activeAppsDevice, packageName);
+        if (result.success) {
+            alert(result.message);
+            loadAppsList();
+        } else {
+            alert(`Disable failed: ${result.error}`);
+        }
+    } catch (err) {
+        alert(`Disable error: ${err.message}`);
+    } finally {
+        setAppsManagerControlsEnabled(true);
+    }
+};
+
 // Bulk Uninstall Checked Apps
 appsBulkUninstallBtn.addEventListener("click", async () => {
     if (!activeAppsDevice) return;
-    
+
     const checkedBoxes = appsBody.querySelectorAll(".app-row-check:checked");
     if (checkedBoxes.length === 0) {
         alert("Please select one or more application packages first.");
@@ -1007,6 +1271,274 @@ appsBulkUninstallBtn.addEventListener("click", async () => {
     } catch (err) {
         alert(`Bulk uninstall error: ${err.message}`);
     } finally {
-        setAppsManagerControlsEnabled(true);
     }
 });
+
+// --- EMBEDDED COMMAND PROMPT TERMINAL LOGIC ---
+
+async function executeTerminalCommand() {
+    const cmd = terminalInput.value.trim();
+    if (!cmd) return;
+
+    const targets = Array.from(selectedDeviceIds);
+    if (targets.length === 0) {
+        appendTerminalText(`\n$ ${cmd}\nError: No devices selected. Select one or more devices from the sidebar.`);
+        return;
+    }
+
+    terminalInput.value = "";
+    appendTerminalText(`\n$ ${cmd} (Executing on ${targets.length} device(s)...)`);
+
+    try {
+        const result = await window.api.runManualCommand(cmd, targets);
+        if (result.success) {
+            let output = "";
+            result.results.forEach(res => {
+                const dev = connectedDevices.find(d => d.id === res.deviceId);
+                const devLabel = dev ? dev.name : res.deviceId;
+                output += `\n[${devLabel}]:\n`;
+                if (res.success) {
+                    output += res.stdout || "(No output)\n";
+                } else {
+                    output += `Error: ${res.stderr || res.error || "Execution failed."}\n`;
+                }
+            });
+            appendTerminalText(output);
+        } else {
+            appendTerminalText(`Error: ${result.error}`);
+        }
+    } catch (err) {
+        appendTerminalText(`Execution Error: ${err.message || err}`);
+    }
+}
+
+function appendTerminalText(text) {
+    terminalOutput.textContent += "\n" + text;
+    terminalOutput.scrollTop = terminalOutput.scrollHeight;
+}
+
+terminalSendBtn.addEventListener("click", executeTerminalCommand);
+terminalInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+        e.preventDefault();
+        executeTerminalCommand();
+    }
+});
+
+// --- CUSTOM CENTER ALERT POPUP SYSTEM ---
+const customAlertOverlay = document.getElementById("customAlertOverlay");
+const customAlertBox = document.getElementById("customAlertBox");
+const customAlertIcon = document.getElementById("customAlertIcon");
+const customAlertTitle = document.getElementById("customAlertTitle");
+const customAlertMessage = document.getElementById("customAlertMessage");
+const customAlertCloseBtn = document.getElementById("customAlertCloseBtn");
+
+let customAlertTimeout = null;
+
+function showCustomAlert(title, message, type = "success") {
+    if (!customAlertOverlay || !customAlertBox) return;
+
+    // Clear any active auto-dismiss timer
+    if (customAlertTimeout) {
+        clearTimeout(customAlertTimeout);
+        customAlertTimeout = null;
+    }
+
+    // Set content
+    customAlertTitle.textContent = title;
+    customAlertMessage.textContent = message;
+
+    // Set icon based on type
+    let iconClass = "fa-solid fa-circle-check"; // success default
+    if (type === "error") {
+        iconClass = "fa-solid fa-circle-xmark";
+    } else if (type === "warning") {
+        iconClass = "fa-solid fa-circle-exclamation";
+    } else if (type === "info") {
+        iconClass = "fa-solid fa-circle-info";
+    }
+    customAlertIcon.innerHTML = `<i class="${iconClass}"></i>`;
+
+    // Reset theme classes
+    customAlertBox.className = "custom-alert-box " + type;
+
+    // Show popup
+    customAlertOverlay.classList.add("show");
+
+    // Auto-dismiss after 3.5 seconds
+    customAlertTimeout = setTimeout(() => {
+        closeCustomAlert();
+    }, 3500);
+}
+
+function closeCustomAlert() {
+    if (customAlertOverlay) {
+        customAlertOverlay.classList.remove("show");
+    }
+    if (customAlertTimeout) {
+        clearTimeout(customAlertTimeout);
+        customAlertTimeout = null;
+    }
+}
+
+if (customAlertCloseBtn) {
+    customAlertCloseBtn.addEventListener("click", closeCustomAlert);
+}
+if (customAlertOverlay) {
+    customAlertOverlay.addEventListener("click", (e) => {
+        if (e.target === customAlertOverlay) {
+            closeCustomAlert();
+        }
+    });
+}
+
+// Override standard window.alert to use our custom center popup
+const originalAlert = window.alert;
+window.alert = function (message) {
+    let title = "Notification";
+    let type = "info";
+    
+    if (typeof message !== "string") {
+        message = String(message);
+    }
+    const lowerMsg = message.toLowerCase();
+    if (lowerMsg.includes("success") || lowerMsg.includes("completed") || lowerMsg.includes("done") || lowerMsg.includes("optimized") || lowerMsg.includes("installed") || lowerMsg.includes("uploaded")) {
+        title = "Success";
+        type = "success";
+    } else if (lowerMsg.includes("fail") || lowerMsg.includes("error") || lowerMsg.includes("could not") || lowerMsg.includes("cancelled")) {
+        title = "Error";
+        type = "error";
+    } else if (lowerMsg.includes("warn") || lowerMsg.includes("attention")) {
+        title = "Warning";
+        type = "warning";
+    }
+    
+    showCustomAlert(title, message, type);
+};
+
+// --- OTHER SETUP TAB STATE & BEHAVIOR ---
+const setupChecklistItems = document.getElementById("setupChecklistItems");
+const checklistProgressText = document.getElementById("checklistProgressText");
+const checklistProgressBar = document.getElementById("checklistProgressBar");
+const resetChecklistBtn = document.getElementById("resetChecklistBtn");
+
+function initChecklist() {
+    if (!setupChecklistItems) return;
+
+    // Load initial state from localStorage
+    const savedState = JSON.parse(localStorage.getItem("signageChecklistState")) || {};
+
+    const checkboxes = setupChecklistItems.querySelectorAll("input[type='checkbox']");
+    checkboxes.forEach(cb => {
+        const id = cb.id;
+        
+        // Restore check state
+        if (savedState[id]) {
+            cb.checked = true;
+            cb.closest(".checklist-item").classList.add("checked");
+        } else {
+            cb.checked = false;
+            cb.closest(".checklist-item").classList.remove("checked");
+        }
+
+        // Change handler on the checkbox
+        cb.addEventListener("change", () => {
+            const itemContainer = cb.closest(".checklist-item");
+            if (cb.checked) {
+                itemContainer.classList.add("checked");
+            } else {
+                itemContainer.classList.remove("checked");
+            }
+            saveChecklistState();
+            updateChecklistProgress();
+        });
+
+        // Click handler on the checklist item box itself (excluding the checkbox) to make it check/uncheck easily
+        const itemContainer = cb.closest(".checklist-item");
+        itemContainer.addEventListener("click", (e) => {
+            if (e.target !== cb) {
+                cb.checked = !cb.checked;
+                // trigger change manually
+                cb.dispatchEvent(new Event("change"));
+            }
+        });
+    });
+
+    updateChecklistProgress();
+}
+
+function saveChecklistState() {
+    if (!setupChecklistItems) return;
+    const checkboxes = setupChecklistItems.querySelectorAll("input[type='checkbox']");
+    const state = {};
+    checkboxes.forEach(cb => {
+        state[cb.id] = cb.checked;
+    });
+    localStorage.setItem("signageChecklistState", JSON.stringify(state));
+}
+
+function updateChecklistProgress() {
+    if (!setupChecklistItems || !checklistProgressText || !checklistProgressBar) return;
+
+    const checkboxes = setupChecklistItems.querySelectorAll("input[type='checkbox']");
+    const total = checkboxes.length;
+    let checkedCount = 0;
+    checkboxes.forEach(cb => {
+        if (cb.checked) checkedCount++;
+    });
+
+    const percent = total > 0 ? Math.round((checkedCount / total) * 100) : 0;
+    checklistProgressText.textContent = `${percent}% (${checkedCount} of ${total} completed)`;
+    checklistProgressBar.style.width = `${percent}%`;
+}
+
+if (resetChecklistBtn) {
+    resetChecklistBtn.addEventListener("click", () => {
+        if (window.confirm("Are you sure you want to reset the setup checklist progress?")) {
+            const checkboxes = setupChecklistItems.querySelectorAll("input[type='checkbox']");
+            checkboxes.forEach(cb => {
+                cb.checked = false;
+                cb.closest(".checklist-item").classList.remove("checked");
+            });
+            saveChecklistState();
+            updateChecklistProgress();
+            showCustomAlert("Checklist Reset", "All checklist progress has been cleared.", "info");
+        }
+    });
+}
+
+// Factory Menu Copy Buttons functionality
+function initFactoryCodeCopyButtons() {
+    const copyButtons = document.querySelectorAll(".copy-code-btn");
+    copyButtons.forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+            e.stopPropagation(); // prevent parent clicks if any
+            const sequence = btn.getAttribute("data-clipboard");
+            const modelName = btn.closest(".factory-code-card").querySelector(".tv-model").textContent;
+
+            try {
+                await navigator.clipboard.writeText(sequence);
+                
+                // Show micro-animation feedback on button
+                const originalHTML = btn.innerHTML;
+                btn.innerHTML = `<i class="fa-solid fa-check" style="color: var(--success);"></i> Copied`;
+                btn.classList.add("btn-success");
+                btn.classList.remove("btn-secondary");
+
+                // Trigger beautiful popup success alert
+                showCustomAlert("Copied to Clipboard", `Factory code for ${modelName} copied: "${sequence}"`, "success");
+
+                // Restore button state after 1.5 seconds
+                setTimeout(() => {
+                    btn.innerHTML = originalHTML;
+                    btn.classList.remove("btn-success");
+                    btn.classList.add("btn-secondary");
+                }, 1500);
+
+            } catch (err) {
+                console.error("Clipboard copy failed:", err);
+                showCustomAlert("Copy Failed", "Failed to copy sequence to clipboard.", "error");
+            }
+        });
+    });
+}

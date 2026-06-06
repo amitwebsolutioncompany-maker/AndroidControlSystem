@@ -1,4 +1,5 @@
-const { exec } = require("child_process");
+const { exec, spawn } = require("child_process");
+const os = require("os");
 
 // Helper to run shell commands as a Promise
 function runShell(command) {
@@ -17,6 +18,41 @@ function runShell(command) {
 function runAdb(deviceId, command) {
   const prefix = deviceId ? `adb -s "${deviceId}" ` : "adb ";
   return runShell(prefix + command);
+}
+
+// Pair device via Wi-Fi TLS (uses spawn for interactive input)
+function pairDevice(ipport, code) {
+  return new Promise((resolve) => {
+    if (!ipport || !code) {
+      resolve({ success: false, error: "IP:Port and Pairing Code are required." });
+      return;
+    }
+    try {
+      const adb = spawn("adb", ["pair", ipport]);
+      let output = "";
+
+      adb.on("error", (err) => {
+        resolve({ success: false, error: `ADB command not found or not setup. Please click 'Setup ADB (One-Click)' first. Details: ${err.message}` });
+      });
+
+      adb.stdout.on("data", (data) => { output += data.toString(); });
+      adb.stderr.on("data", (data) => { output += data.toString(); });
+
+      // Write the 6-digit code to stdin and press enter
+      adb.stdin.write(code + "\n");
+
+      adb.on("close", (codeExit) => {
+        const isSuccess = codeExit === 0 || output.includes("Successfully paired");
+        if (isSuccess) {
+          resolve({ success: true, message: output.trim() || "Paired successfully!" });
+        } else {
+          resolve({ success: false, error: output.trim() || `Pairing failed (Exit code: ${codeExit})` });
+        }
+      });
+    } catch (err) {
+      resolve({ success: false, error: err.message || String(err) });
+    }
+  });
 }
 
 // Connect device via Wi-Fi
@@ -42,7 +78,7 @@ async function checkUsb() {
 
   const lines = res.stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const devices = [];
-  
+
   for (const line of lines.slice(1)) {
     const parts = line.split(/\s+/);
     if (parts.length >= 2 && parts[1] === "device") {
@@ -52,10 +88,10 @@ async function checkUsb() {
 
   const usbDevices = devices.filter(d => !d.includes(":"));
   if (usbDevices.length > 0) {
-    return { 
-      success: true, 
+    return {
+      success: true,
       message: `Detected ${usbDevices.length} USB device(s): ${usbDevices.join(", ")}`,
-      devices: usbDevices 
+      devices: usbDevices
     };
   } else {
     return { success: false, message: "No USB devices detected. Make sure USB debugging is enabled on the device." };
@@ -70,11 +106,11 @@ async function getConnectedDevicesWithDetails() {
   }
   const lines = res.stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const devices = [];
-  
+
   for (const line of lines.slice(1)) {
     const parts = line.split(/\s+/);
     if (parts.length < 2) continue;
-    
+
     const id = parts[0];
     const adbStatus = parts[1];
     let status = "Offline";
@@ -142,29 +178,28 @@ async function pushFilesToDevice(deviceId, paths, dest = "/sdcard/") {
   return { success: true, results };
 }
 
-// Remove bloatware and optimize settings on specific device
+// Remove bloatware (disable-user) and optimize settings on specific device
 async function cleanupDevice(deviceId) {
-  const bloatwareList = [
+  const disablePackagesList = [
     "tv.cloudwalker.updater",
-    "tv.cloudwalker.profile",
     "com.cvte.tv.systemupgrade",
     "tv.cloudwalker.inputserver",
+    "tv.cloudwalker.market",
+    "tv.cloudwalker.profile",
     "tv.cloudwalker.voice",
     "tv.cloudwalker.player",
-    "tv.cloudwalker.apiservice",
     "tv.cloudwalker.guide",
     "com.stark.store",
     "com.seraphic.openinet.cvte",
-    "com.zeasn.services.general",
-    "com.example.user.myapplication"
   ];
 
   const optimizationCommands = [
+    "settings put global ota_disable_automatic_update 1",
+    "settings put global auto_update_apps 0",
+    "settings put global auto_update_system 0",
     "settings put global heads_up_notifications_enabled 0",
     "settings put secure show_notification_snooze 0",
     "settings put global heads_up_off 1",
-    "settings put global auto_update_system 0",
-    "settings put global ota_disable_automatic_update 1",
     "settings put system screen_off_timeout 2147483647",
     "settings put secure screensaver_enabled 0",
     "settings put secure screensaver_activate_on_sleep 0",
@@ -177,14 +212,16 @@ async function cleanupDevice(deviceId) {
 
   const results = [];
 
-  for (const pkg of bloatwareList) {
-    const res = await runAdb(deviceId, `shell pm uninstall --user 0 ${pkg}`);
+  // Disable bloatware packages
+  for (const pkg of disablePackagesList) {
+    const res = await runAdb(deviceId, `shell pm disable-user --user 0 ${pkg}`);
     results.push({
-      item: `Uninstall ${pkg}`,
-      status: res.success && res.stdout.includes("Success") ? "Success" : "Already Removed / Skipped"
+      item: `Disable ${pkg}`,
+      status: res.success && (res.stdout.includes("new state") || res.stdout.includes("disabled")) ? "Success" : "Already Disabled / Skipped"
     });
   }
 
+  // Run optimizations (reboot, screensaver timeouts, sleep overrides)
   for (const cmd of optimizationCommands) {
     const res = await runAdb(deviceId, `shell ${cmd}`);
     results.push({
@@ -219,32 +256,39 @@ async function rebootDevice(deviceId) {
 
 // --- Device File Manager Helpers ---
 
-// Parse output lines of ls -la
-function parseLsOutput(stdout) {
-  const lines = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+// List files on device at path
+async function listFiles(deviceId, remotePath) {
+  const targetPath = remotePath || "/sdcard/";
+  const res = await runAdb(deviceId, `shell ls -la "${targetPath}"`);
+  if (!res.success) {
+    return { success: false, error: res.error || res.stdout || "Failed to list directories." };
+  }
+
+  // Reuse parse logic from previous turn
+  const lines = res.stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const items = [];
-  
+
   for (const line of lines) {
     if (line.startsWith("total ")) continue;
-    
+
     const parts = line.split(/\s+/);
     if (parts.length < 8) continue;
-    
+
     const perms = parts[0];
     const isDir = perms.startsWith('d');
     const isLink = perms.startsWith('l');
-    
+
     const size = parseInt(parts[4], 10) || 0;
     const dateStr = `${parts[5]} ${parts[6]}`;
-    
+
     let name = parts.slice(7).join(" ");
-    
+
     if (isLink && name.includes(" -> ")) {
       name = name.split(" -> ")[0];
     }
-    
+
     if (name === "." || name === "..") continue;
-    
+
     items.push({
       name,
       isDir: isDir || isLink,
@@ -252,18 +296,7 @@ function parseLsOutput(stdout) {
       date: dateStr
     });
   }
-  return items;
-}
 
-// List files on device at path
-async function listFiles(deviceId, remotePath) {
-  const targetPath = remotePath || "/sdcard/";
-  // Use -p to separate folders or parse the Toybox output
-  const res = await runAdb(deviceId, `shell ls -la "${targetPath}"`);
-  if (!res.success) {
-    return { success: false, error: res.error || res.stdout || "Failed to list directories." };
-  }
-  const items = parseLsOutput(res.stdout);
   return { success: true, items };
 }
 
@@ -336,7 +369,7 @@ function getFriendlyAppName(packageName) {
     "com.amazon.amazonvideo.livingroom": "Amazon Prime Video",
     "tv.cloudwalker.neonlauncher.com": "Cloudwalker Neon Launcher"
   };
-  
+
   if (knownApps[packageName]) {
     return knownApps[packageName];
   }
@@ -346,7 +379,7 @@ function getFriendlyAppName(packageName) {
   if (lastPart === "tv" || lastPart === "android" || lastPart === "app") {
     lastPart = parts[parts.length - 2] || lastPart;
   }
-  
+
   return lastPart
     .replace(/[_-]/g, ' ')
     .split(' ')
@@ -385,6 +418,253 @@ async function uninstallApp(deviceId, packageName) {
   }
 }
 
+// Disable package from device
+async function disableApp(deviceId, packageName) {
+  const res = await runAdb(deviceId, `shell pm disable-user --user 0 ${packageName}`);
+  if (res.success && (res.stdout.includes("new state") || res.stdout.includes("disabled"))) {
+    return { success: true, message: `Successfully disabled ${packageName}` };
+  } else {
+    return { success: false, error: res.stdout.trim() || res.error || "Disable failed." };
+  }
+}
+
+// --- Setup and Manual Command Executors ---
+
+// Auto Setup ADB platform tools (Windows)
+function autoSetupADB() {
+  if (os.platform() !== "win32") {
+    return Promise.resolve({ success: false, error: "Auto ADB setup is supported only on Windows." });
+  }
+
+  const psScript = `
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+
+$adbExists = Get-Command adb -ErrorAction SilentlyContinue
+if ($adbExists) {
+  Write-Output "ADB already installed at: $($adbExists.Source)"
+  exit
+}
+
+$adbUrl = "https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
+$zipPath = "$env:TEMP\\platform-tools.zip"
+$installPath = "$env:USERPROFILE\\platform-tools"
+
+Write-Output "Downloading ADB..."
+Invoke-WebRequest -Uri $adbUrl -OutFile $zipPath
+
+Write-Output "Extracting files to $installPath..."
+Expand-Archive -Path $zipPath -DestinationPath $env:USERPROFILE -Force
+
+$oldPath = [Environment]::GetEnvironmentVariable("Path","User")
+if ($oldPath -notlike "*platform-tools*") {
+  Write-Output "Adding platform-tools to USER PATH..."
+  [Environment]::SetEnvironmentVariable("Path", "$oldPath;$installPath", "User")
+}
+
+Write-Output "Verifying installation..."
+& "$installPath\\adb.exe" version
+Write-Output "ADB setup completed successfully! Restarting client may be required."
+`;
+
+  const encoded = Buffer.from(psScript, "utf16le").toString("base64");
+
+  return new Promise((resolve) => {
+    exec(
+      `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encoded}`,
+      { windowsHide: true },
+      (err, stdout, stderr) => {
+        if (err) {
+          resolve({ success: false, error: stderr || err.message });
+        } else {
+          resolve({ success: true, message: stdout.trim() });
+        }
+      }
+    );
+  });
+}
+
+// Run custom shell command (for Embedded Command Prompt)
+function runManualCommand(command, deviceId) {
+  let finalCommand = command.trim();
+  if (deviceId) {
+    if (finalCommand.startsWith("adb")) {
+      if (!/\badb\s+-s\b/.test(finalCommand)) {
+        finalCommand = finalCommand.replace(/^adb(\b)/, `adb -s "${deviceId}"$1`);
+      }
+    } else {
+      finalCommand = `adb -s "${deviceId}" ${finalCommand}`;
+    }
+  }
+  return new Promise((resolve) => {
+    exec(finalCommand, { maxBuffer: 1024 * 1024 * 10 }, (err, stdout, stderr) => {
+      resolve({
+        success: !err,
+        stdout: stdout || "",
+        stderr: stderr || (err ? err.message : "")
+      });
+    });
+  });
+}
+
+// Start Screen Mirroring & Control using scrcpy
+function startScrcpy(deviceId, deviceName) {
+  return new Promise((resolve) => {
+    const path = require("path");
+    const fs = require("fs");
+    const os = require("os");
+
+    const scrcpyPath = path.join(os.homedir(), "scrcpy", "scrcpy.exe");
+    const title = deviceName ? `Control - ${deviceName}` : `Control - ${deviceId}`;
+    const args = ["--serial", deviceId, "--window-title", title, "--always-on-top"];
+
+    const fileExists = fs.existsSync(scrcpyPath);
+
+    console.log(`[scrcpy-launch] Resolved Path: ${scrcpyPath}`);
+    console.log(`[scrcpy-launch] File Exists: ${fileExists}`);
+    console.log(`[scrcpy-launch] Spawn Arguments: ${JSON.stringify(args)}`);
+
+    if (!fileExists) {
+      const errorMsg = `scrcpy.exe not found at ${scrcpyPath}. Please configure it first.`;
+      console.error(`[scrcpy-launch] Error: ${errorMsg}`);
+      resolve({ success: false, error: errorMsg });
+      return;
+    }
+
+    try {
+      const scrcpyProcess = spawn(scrcpyPath, args, {
+        detached: true,
+        stdio: "ignore"
+      });
+
+      scrcpyProcess.unref();
+
+      scrcpyProcess.on("error", (err) => {
+        console.error(`[scrcpy-launch] Spawn error: ${err.message}`);
+        resolve({ success: false, error: `Could not launch scrcpy process. Detail: ${err.message}` });
+      });
+
+      setTimeout(() => {
+        resolve({ success: true, message: `Screen control window launched.` });
+      }, 450);
+    } catch (err) {
+      console.error(`[scrcpy-launch] Try-catch spawn error: ${err.message || err}`);
+      resolve({ success: false, error: `Error spawning scrcpy: ${err.message || err}` });
+    }
+  });
+}
+
+// Auto Setup Scrcpy (Windows)
+function autoSetupScrcpy() {
+  if (os.platform() !== "win32") {
+    return Promise.resolve({ success: false, error: "Auto setup is supported only on Windows." });
+  }
+
+  const psScript = `
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+
+$installPath = "$env:USERPROFILE\\scrcpy"
+$scrcpyExists = Get-Command scrcpy -ErrorAction SilentlyContinue
+if ($scrcpyExists) {
+  Write-Output "Scrcpy already installed at: $($scrcpyExists.Source)"
+  exit
+}
+
+# If PATH is not set but folder exists, check if scrcpy.exe exists in that folder
+$scrcpyExePath = Join-Path $installPath "scrcpy.exe"
+if (Test-Path $scrcpyExePath) {
+  $oldPath = [Environment]::GetEnvironmentVariable("Path","User")
+  if ($oldPath -notlike "*scrcpy*") {
+    [Environment]::SetEnvironmentVariable("Path", "$oldPath;$installPath", "User")
+  }
+  Write-Output "Scrcpy folder already exists. Registered to USER PATH."
+  exit
+}
+
+# Clean up any failed extractions first
+$tempExtracted = Get-ChildItem -Path $env:USERPROFILE -Filter "scrcpy-win64-*" | Select-Object -First 1
+if ($tempExtracted) {
+  Remove-Item -Path $tempExtracted.FullName -Recurse -Force
+}
+if (Test-Path $installPath) {
+  Remove-Item -Path $installPath -Recurse -Force
+}
+
+$scrcpyUrl = "https://github.com/Genymobile/scrcpy/releases/download/v2.4/scrcpy-win64-v2.4.zip"
+$zipPath = "$env:TEMP\\scrcpy.zip"
+
+Write-Output "Downloading Scrcpy..."
+Invoke-WebRequest -Uri $scrcpyUrl -OutFile $zipPath
+
+Write-Output "Extracting files to $installPath..."
+Expand-Archive -Path $zipPath -DestinationPath $env:USERPROFILE -Force
+
+$extractedFolder = Get-ChildItem -Path $env:USERPROFILE -Filter "scrcpy-win64-*" | Select-Object -First 1
+if ($extractedFolder) {
+  Rename-Item -Path $extractedFolder.FullName -NewName "scrcpy" -Force
+}
+
+$oldPath = [Environment]::GetEnvironmentVariable("Path","User")
+if ($oldPath -notlike "*scrcpy*") {
+  [Environment]::SetEnvironmentVariable("Path", "$oldPath;$installPath", "User")
+}
+
+Write-Output "Verifying installation..."
+& "$installPath\\scrcpy.exe" --version
+Write-Output "Scrcpy setup completed successfully! Restarting client may be required."
+`;
+
+  const encoded = Buffer.from(psScript, "utf16le").toString("base64");
+
+  return new Promise((resolve) => {
+    exec(
+      `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encoded}`,
+      { windowsHide: true },
+      (err, stdout, stderr) => {
+        if (err) {
+          resolve({ success: false, error: stderr || err.message });
+        } else {
+          resolve({ success: true, message: stdout.trim() });
+        }
+      }
+    );
+  });
+}
+
+// Start ADB Server
+async function startAdbServer() {
+  const res = await runShell("adb start-server");
+  if (res.success) {
+    return { success: true, message: res.stdout.trim() || "ADB Server started successfully." };
+  } else {
+    return { success: false, error: res.error || "Failed to start ADB Server." };
+  }
+}
+
+// Kill ADB Server
+async function killAdbServer() {
+  const res = await runShell("adb kill-server");
+  if (res.success) {
+    return { success: true, message: res.stdout.trim() || "ADB Server killed successfully." };
+  } else {
+    return { success: false, error: res.error || "Failed to kill ADB Server." };
+  }
+}
+
+// Disconnect specific device
+async function disconnectDevice(deviceId) {
+  if (!deviceId) {
+    return { success: false, error: "No Device ID provided." };
+  }
+  const res = await runShell(`adb disconnect ${deviceId}`);
+  if (res.success) {
+    return { success: true, message: res.stdout.trim() };
+  } else {
+    return { success: false, error: res.stdout.trim() || res.error || "Failed to disconnect device." };
+  }
+}
+
 module.exports = {
   connectWifi,
   checkUsb,
@@ -401,5 +681,14 @@ module.exports = {
   pullFile,
   pushFile,
   listApps,
-  uninstallApp
+  uninstallApp,
+  disableApp,
+  pairDevice,
+  autoSetupADB,
+  runManualCommand,
+  startScrcpy,
+  autoSetupScrcpy,
+  startAdbServer,
+  killAdbServer,
+  disconnectDevice
 };
