@@ -134,24 +134,6 @@
                 </div>
             </div>
 
-            <!-- One-Click Auto-Setup Scrcpy Panel -->
-            <div class="connection-panel"
-                style="background: rgba(99, 102, 241, 0.08); border-color: rgba(99, 102, 241, 0.2); margin-top: 10px;">
-                <div class="sidebar-title" style="color: var(--primary); margin-bottom: 6px; font-size: 13px;">
-                    <i class="fa-solid fa-desktop"></i> Screen Mirror Setup
-                </div>
-                <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.4;">
-                    Click to download and configure Scrcpy mirroring tool PATH automatically.
-                </p>
-                <button class="btn btn-primary" id="autoSetupScrcpyBtn" style="width: 100%;">
-                    Setup Scrcpy (One-Click)
-                </button>
-                <div id="scrcpySetupStatus"
-                    style="font-size: 11px; color: var(--text-muted); margin-top: 6px; text-align: center; font-weight: 500;">
-                    Status: Not started
-                </div>
-            </div>
-
         </aside>
 
         <!-- MAIN WINDOW: Content Panels -->
@@ -609,83 +591,104 @@
                             </div>
                         </div>
 
-                        <!-- Right Column: Open Factory Menu shortcuts -->
-                        <div class="card factory-codes-card">
-                            <div class="card-title">
-                                <i class="fa-solid fa-toolbox"></i> Open Factory Menu Shortcuts
+                        <!-- Right Column: Open Factory Menu shortcuts & Scrcpy Setup -->
+                        <div style="display: flex; flex-direction: column; gap: 20px;">
+                            
+                            <div class="card factory-codes-card" style="margin-bottom: 0;">
+                                <div class="card-title">
+                                    <i class="fa-solid fa-toolbox"></i> Open Factory Menu Shortcuts
+                                </div>
+                                <div class="card-desc">Click the Copy button beside any sequence.</div>
+
+                                <div class="factory-codes-list">
+                                    <div class="factory-code-card">
+                                        <div class="factory-code-header">
+                                            <span class="tv-model">Google TV</span>
+                                            <button class="btn btn-secondary copy-code-btn"
+                                                data-clipboard="Home → INPUT → LEFT → RIGHT → LEFT → RIGHT → BACK"
+                                                title="Copy code sequence">
+                                                <i class="fa-solid fa-copy"></i> Copy
+                                            </button>
+                                        </div>
+                                        <div class="factory-code-sequence">Home → INPUT → LEFT → RIGHT → LEFT → RIGHT → BACK
+                                        </div>
+                                    </div>
+
+                                    <div class="factory-code-card">
+                                        <div class="factory-code-header">
+                                            <span class="tv-model">Google TV 43, 55</span>
+                                            <button class="btn btn-secondary copy-code-btn"
+                                                data-clipboard="INPUT → LEFT → LEFT → UP → DOWN" title="Copy code sequence">
+                                                <i class="fa-solid fa-copy"></i> Copy
+                                            </button>
+                                        </div>
+                                        <div class="factory-code-sequence">INPUT → LEFT → LEFT → UP → DOWN</div>
+                                    </div>
+
+                                    <div class="factory-code-card">
+                                        <div class="factory-code-header">
+                                            <span class="tv-model">Smart TV</span>
+                                            <button class="btn btn-secondary copy-code-btn"
+                                                data-clipboard="MENU → 1 → 1 → 4 → 7" title="Copy code sequence">
+                                                <i class="fa-solid fa-copy"></i> Copy
+                                            </button>
+                                        </div>
+                                        <div class="factory-code-sequence">MENU → 1 → 1 → 4 → 7</div>
+                                    </div>
+
+                                    <div class="factory-code-card">
+                                        <div class="factory-code-header">
+                                            <span class="tv-model">GTV</span>
+                                            <button class="btn btn-secondary copy-code-btn"
+                                                data-clipboard="INPUT → LEFT → LEFT → UP → RIGHT"
+                                                title="Copy code sequence">
+                                                <i class="fa-solid fa-copy"></i> Copy
+                                            </button>
+                                        </div>
+                                        <div class="factory-code-sequence">INPUT → LEFT → LEFT → UP → RIGHT</div>
+                                    </div>
+
+                                    <div class="factory-code-card">
+                                        <div class="factory-code-header">
+                                            <span class="tv-model">GTV Alternate 1</span>
+                                            <button class="btn btn-secondary copy-code-btn"
+                                                data-clipboard="Home → 1 → 1 → 0 → 5 → OK" title="Copy code sequence">
+                                                <i class="fa-solid fa-copy"></i> Copy
+                                            </button>
+                                        </div>
+                                        <div class="factory-code-sequence">Home → 1 → 1 → 0 → 5 → OK</div>
+                                    </div>
+
+                                    <div class="factory-code-card">
+                                        <div class="factory-code-header">
+                                            <span class="tv-model">GTV Alternate 2</span>
+                                            <button class="btn btn-secondary copy-code-btn"
+                                                data-clipboard="UP → DOWN → LEFT → RIGHT → OK" title="Copy code sequence">
+                                                <i class="fa-solid fa-copy"></i> Copy
+                                            </button>
+                                        </div>
+                                        <div class="factory-code-sequence">UP → DOWN → LEFT → RIGHT → OK</div>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="card-desc">Click the Copy button beside any sequence.</div>
 
-                            <div class="factory-codes-list">
-                                <div class="factory-code-card">
-                                    <div class="factory-code-header">
-                                        <span class="tv-model">Google TV</span>
-                                        <button class="btn btn-secondary copy-code-btn"
-                                            data-clipboard="Home → INPUT → LEFT → RIGHT → LEFT → RIGHT → BACK"
-                                            title="Copy code sequence">
-                                            <i class="fa-solid fa-copy"></i> Copy
-                                        </button>
-                                    </div>
-                                    <div class="factory-code-sequence">Home → INPUT → LEFT → RIGHT → LEFT → RIGHT → BACK
-                                    </div>
+                            <!-- One-Click Auto-Setup Scrcpy Panel -->
+                            <div class="card connection-panel" style="margin-bottom: 0; background: rgba(99, 102, 241, 0.08); border-color: rgba(99, 102, 241, 0.2);">
+                                <div class="card-title" style="color: var(--primary);">
+                                    <i class="fa-solid fa-desktop"></i> Screen Mirror Setup
                                 </div>
-
-                                <div class="factory-code-card">
-                                    <div class="factory-code-header">
-                                        <span class="tv-model">Google TV 43, 55</span>
-                                        <button class="btn btn-secondary copy-code-btn"
-                                            data-clipboard="INPUT → LEFT → LEFT → UP → DOWN" title="Copy code sequence">
-                                            <i class="fa-solid fa-copy"></i> Copy
-                                        </button>
+                                <div class="card-desc">Click to download and configure Scrcpy mirroring tool PATH automatically.</div>
+                                <div class="card-body">
+                                    <button class="btn btn-primary" id="autoSetupScrcpyBtn" style="width: 100%;">
+                                        Setup Scrcpy (One-Click)
+                                    </button>
+                                    <div id="scrcpySetupStatus"
+                                        style="font-size: 11px; color: var(--text-muted); margin-top: 6px; text-align: center; font-weight: 500;">
+                                        Status: Not started
                                     </div>
-                                    <div class="factory-code-sequence">INPUT → LEFT → LEFT → UP → DOWN</div>
-                                </div>
-
-                                <div class="factory-code-card">
-                                    <div class="factory-code-header">
-                                        <span class="tv-model">Smart TV</span>
-                                        <button class="btn btn-secondary copy-code-btn"
-                                            data-clipboard="MENU → 1 → 1 → 4 → 7" title="Copy code sequence">
-                                            <i class="fa-solid fa-copy"></i> Copy
-                                        </button>
-                                    </div>
-                                    <div class="factory-code-sequence">MENU → 1 → 1 → 4 → 7</div>
-                                </div>
-
-                                <div class="factory-code-card">
-                                    <div class="factory-code-header">
-                                        <span class="tv-model">GTV</span>
-                                        <button class="btn btn-secondary copy-code-btn"
-                                            data-clipboard="INPUT → LEFT → LEFT → UP → RIGHT"
-                                            title="Copy code sequence">
-                                            <i class="fa-solid fa-copy"></i> Copy
-                                        </button>
-                                    </div>
-                                    <div class="factory-code-sequence">INPUT → LEFT → LEFT → UP → RIGHT</div>
-                                </div>
-
-                                <div class="factory-code-card">
-                                    <div class="factory-code-header">
-                                        <span class="tv-model">GTV Alternate 1</span>
-                                        <button class="btn btn-secondary copy-code-btn"
-                                            data-clipboard="Home → 1 → 1 → 0 → 5 → OK" title="Copy code sequence">
-                                            <i class="fa-solid fa-copy"></i> Copy
-                                        </button>
-                                    </div>
-                                    <div class="factory-code-sequence">Home → 1 → 1 → 0 → 5 → OK</div>
-                                </div>
-
-                                <div class="factory-code-card">
-                                    <div class="factory-code-header">
-                                        <span class="tv-model">GTV Alternate 2</span>
-                                        <button class="btn btn-secondary copy-code-btn"
-                                            data-clipboard="UP → DOWN → LEFT → RIGHT → OK" title="Copy code sequence">
-                                            <i class="fa-solid fa-copy"></i> Copy
-                                        </button>
-                                    </div>
-                                    <div class="factory-code-sequence">UP → DOWN → LEFT → RIGHT → OK</div>
                                 </div>
                             </div>
+
                         </div>
 
                     </div>
