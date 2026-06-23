@@ -665,6 +665,251 @@ async function disconnectDevice(deviceId) {
   }
 }
 
+// Get active local network subnets
+function getLocalSubnets() {
+  const interfaces = os.networkInterfaces();
+  const subnets = [];
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === "IPv4" && !iface.internal) {
+        const ip = iface.address;
+        const parts = ip.split(".");
+        if (parts.length === 4) {
+          const base = `${parts[0]}.${parts[1]}.${parts[2]}`;
+          subnets.push({ base, localIp: ip });
+        }
+      }
+    }
+  }
+  return subnets;
+}
+
+// Check if port 5555 is open on a specific IP
+function checkPort5555(ip, timeout = 400) {
+  const net = require("net");
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    let resolved = false;
+
+    const cleanup = () => {
+      if (!resolved) {
+        resolved = true;
+        socket.destroy();
+      }
+    };
+
+    socket.setTimeout(timeout);
+    
+    socket.on("connect", () => {
+      cleanup();
+      resolve(true);
+    });
+
+    socket.on("error", () => {
+      cleanup();
+      resolve(false);
+    });
+
+    socket.on("timeout", () => {
+      cleanup();
+      resolve(false);
+    });
+
+    socket.connect(5555, ip);
+  });
+}
+
+// Scan a single subnet base (e.g. 192.168.1)
+async function scanSubnet(subnetBase, localIp) {
+  const openIps = [];
+  const promises = [];
+  for (let i = 1; i <= 254; i++) {
+    const ip = `${subnetBase}.${i}`;
+    if (ip === localIp) continue;
+    
+    promises.push(
+      checkPort5555(ip).then((isOpen) => {
+        if (isOpen) {
+          openIps.push(`${ip}:5555`);
+        }
+      })
+    );
+  }
+  await Promise.all(promises);
+  return openIps;
+}
+
+// Discover devices using adb mdns services
+async function discoverMdnsDevices() {
+  const res = await runShell("adb mdns services");
+  const discovered = [];
+  if (res.success && res.stdout) {
+    const regex = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)/g;
+    let match;
+    while ((match = regex.exec(res.stdout)) !== null) {
+      discovered.push(match[0]);
+    }
+  }
+  return discovered;
+}
+
+// Auto scan network and connect to all detected devices
+async function autoDiscoverAndConnectWiFiDevices() {
+  const newlyConnected = [];
+  try {
+    const mdnsTargets = await discoverMdnsDevices();
+    const subnets = getLocalSubnets();
+    let portScanTargets = [];
+
+    // Scan subnets sequentially to be gentle on the host OS socket limit
+    for (const subnet of subnets) {
+      const open = await scanSubnet(subnet.base, subnet.localIp);
+      portScanTargets = portScanTargets.concat(open);
+    }
+
+    // Merge and deduplicate targets
+    const allTargets = Array.from(new Set([...mdnsTargets, ...portScanTargets]));
+
+    if (allTargets.length === 0) {
+      return { success: true, connectedCount: 0, devices: [] };
+    }
+
+    // Connect to all targets in parallel
+    await Promise.all(
+      allTargets.map(async (target) => {
+        const res = await runShell(`adb connect ${target}`);
+        if (res.success && (res.stdout.includes("connected to") || res.stdout.includes("already connected"))) {
+          newlyConnected.push(target);
+        }
+      })
+    );
+
+    return {
+      success: true,
+      connectedCount: newlyConnected.length,
+      devices: newlyConnected
+    };
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
+  }
+}
+// Send raw keyevent
+async function sendKeyevent(deviceId, keycode) {
+  return await runAdb(deviceId, `shell input keyevent ${keycode}`);
+}
+
+// Send special statusbar command (notifications or settings)
+async function sendSpecialCommand(deviceId, cmdType) {
+  let cmd = "";
+  if (cmdType === "notifications") {
+    cmd = "shell cmd statusbar expand-notifications";
+  } else if (cmdType === "settings") {
+    cmd = "shell am start -a android.settings.SETTINGS";
+  } else {
+    return { success: false, error: `Invalid special command: ${cmdType}` };
+  }
+  return await runAdb(deviceId, cmd);
+}
+
+// Get device local IP address
+async function checkDeviceIp(deviceId) {
+  let res = await runAdb(deviceId, "shell ip route");
+  if (res.success && res.stdout) {
+    const match = res.stdout.match(/src\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+    if (match) {
+      return { success: true, ip: match[1] };
+    }
+  }
+  
+  res = await runAdb(deviceId, "shell ip addr show wlan0");
+  if (res.success && res.stdout) {
+    const match = res.stdout.match(/inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+    if (match) {
+      return { success: true, ip: match[1] };
+    }
+  }
+  
+  res = await runAdb(deviceId, "shell getprop dhcp.wlan0.ipaddress");
+  if (res.success && res.stdout && res.stdout.trim()) {
+    return { success: true, ip: res.stdout.trim() };
+  }
+  
+  return { success: false, error: "IP address not found." };
+}
+
+// Check Wi-Fi SSID and Signal Quality (RSSI)
+async function checkWifiStatus(deviceId) {
+  const res = await runAdb(deviceId, "shell dumpsys wifi");
+  if (!res.success) {
+    return { success: false, error: "Failed to query wifi status." };
+  }
+
+  const ssidMatch = res.stdout.match(/SSID:\s*"?([^"\n]+)"?/i);
+  const rssiMatch = res.stdout.match(/RSSI:\s*(-?\d+)/i);
+  const ssid = ssidMatch ? ssidMatch[1].trim() : "Unknown SSID";
+  const rssi = rssiMatch ? parseInt(rssiMatch[1], 10) : null;
+  
+  let quality = "Unknown";
+  if (rssi !== null) {
+    if (rssi >= -50) quality = "Excellent 🟢";
+    else if (rssi >= -60) quality = "Good 🟢";
+    else if (rssi >= -70) quality = "Fair 🟡";
+    else if (rssi >= -80) quality = "Weak 🔴";
+    else quality = "Very Poor / Disconnected 🔴";
+  }
+
+  return {
+    success: true,
+    ssid,
+    rssi: rssi !== null ? `${rssi} dBm` : "N/A",
+    quality
+  };
+}
+
+// Check internet access on device (ping 8.8.8.8)
+async function checkConnectivity(deviceId) {
+  const res = await runAdb(deviceId, "shell ping -c 2 -W 2 8.8.8.8");
+  if (res.success && res.stdout) {
+    if (res.stdout.includes("0% packet loss")) {
+      return { success: true, status: "Connected (0% packet loss)" };
+    } else if (res.stdout.includes("100% packet loss")) {
+      return { success: false, status: "Offline (100% packet loss)" };
+    } else {
+      const match = res.stdout.match(/(\d+)% packet loss/);
+      const loss = match ? match[1] : "some";
+      return { success: true, status: `Connected with packet loss (${loss}% loss)` };
+    }
+  }
+  return { success: false, status: "Offline (Ping failed)" };
+}
+
+// Open Developer Options activity on TV screen
+async function openDeveloperOptions(deviceId) {
+  const res = await runAdb(deviceId, "shell am start -a android.settings.APPLICATION_DEVELOPMENT_SETTINGS");
+  if (res.success && (res.stdout.includes("Starting:") || res.stdout.trim() === "")) {
+    return { success: true, message: "Developer Options screen opened." };
+  }
+  return { success: false, error: res.stdout.trim() || res.error || "Failed to open settings." };
+}
+
+// Open Service Menu based on TV model
+async function openServiceMenu(deviceId, menuType) {
+  let sequence = "";
+  if (menuType === "gtv") {
+    // INPUT (178) -> LEFT (21) -> LEFT (21) -> UP (19) -> DOWN (20)
+    sequence = "input keyevent 178 && input keyevent 21 && input keyevent 21 && input keyevent 19 && input keyevent 20";
+  } else if (menuType === "smarta") {
+    // MENU (82) -> 8 (8) -> 8 (8) -> 1 (11) -> 4 (14)
+    sequence = "input keyevent 82 && input keyevent 8 && input keyevent 8 && input keyevent 11 && input keyevent 14";
+  } else if (menuType === "smartb") {
+    // INPUT/SOURCE (178) -> 2 (9) -> 0 (7) -> 8 (15)
+    sequence = "input keyevent 178 && input keyevent 9 && input keyevent 7 && input keyevent 15";
+  } else {
+    return { success: false, error: `Invalid menu type: ${menuType}` };
+  }
+  return await runAdb(deviceId, `shell "${sequence}"`);
+}
+
 module.exports = {
   connectWifi,
   checkUsb,
@@ -690,5 +935,13 @@ module.exports = {
   autoSetupScrcpy,
   startAdbServer,
   killAdbServer,
-  disconnectDevice
+  disconnectDevice,
+  autoDiscoverAndConnectWiFiDevices,
+  sendKeyevent,
+  sendSpecialCommand,
+  checkDeviceIp,
+  checkWifiStatus,
+  checkConnectivity,
+  openDeveloperOptions,
+  openServiceMenu
 };

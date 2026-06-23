@@ -12,6 +12,37 @@
 
 <body class="dark-mode">
 
+    <!-- Security Lockout Login Overlay -->
+    <div class="login-overlay" id="loginOverlay">
+        <div class="login-box" id="loginBox">
+            <div class="login-logo">
+                <i class="fa-solid fa-shield-halved"></i>
+            </div>
+            <h2>Security Verification</h2>
+            <p>Please enter the system administrator password to unlock the Nextview Control suite.</p>
+            <div class="login-form">
+                <div style="position: relative; width: 100%;">
+                    <input type="password" id="loginPasswordInput" placeholder="Enter password..." autofocus>
+                    <button id="toggleLoginPasswordBtn" title="Show/Hide Password"
+                        style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 5px;">
+                        <i class="fa-solid fa-eye" id="toggleLoginPasswordIcon"></i>
+                    </button>
+                </div>
+                <div class="password-hint">
+                    Hint: <code>408@amit</code>
+                </div>
+                <button class="btn btn-primary" id="loginSubmitBtn"
+                    style="width: 100%; height: 42px; margin-top: 10px;">
+                    <i class="fa-solid fa-lock-open"></i> Unlock System
+                </button>
+                <div id="loginErrorMessage"
+                    style="color: var(--danger); font-size: 12px; margin-top: 8px; font-weight: 600; display: none;">
+                    Invalid password. Please try again.
+                </div>
+            </div>
+        </div>
+    </div>
+
     <header>
 
         <div class="logo-section">
@@ -90,12 +121,22 @@
                     <button class="btn btn-secondary usb-scan-btn" id="usbBtn" style="margin-top: 5px;">
                         <i class="fa-solid fa-usb"></i> Scan USB Devices
                     </button>
+
+                    <button class="btn btn-primary" id="autoNetworkScanBtn"
+                        style="margin-top: 10px; width: 100%; background: linear-gradient(135deg, #3b82f6, #1d4ed8); border: none;">
+                        <i class="fa-solid fa-tower-broadcast"></i> Scan & Connect Network
+                    </button>
                 </div>
             </div>
 
             <div class="device-discovery-panel">
                 <div class="discovery-header">
-                    <div class="sidebar-title">Target Devices</div>
+                    <div class="sidebar-title"
+                        style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                        <span>Target Devices</span>
+                        <span id="connectedCountBadge"
+                            style="background: var(--primary); color: white; padding: 2px 7px; border-radius: 12px; font-size: 11px; font-weight: bold; min-width: 20px; text-align: center; line-height: 1.2;">0</span>
+                    </div>
                     <button class="btn btn-secondary discovery-small-btn" id="refreshDevicesBtn"
                         title="Refresh Devices List">
                         <i class="fa-solid fa-rotate"></i>
@@ -234,46 +275,156 @@
                             </div>
                         </div>
 
-                    </div>
-
-                    <!-- Embedded Command Prompt -->
-                    <!-- Embedded Command Prompt -->
-                    <div class="terminal-row">
-                        <div class="card terminal-card">
+                        <div class="card">
                             <div class="card-title">
-                                <i class="fa-solid fa-terminal"></i> Embedded Command Prompt
+                                <i class="fa-solid fa-gamepad"></i> Step 5: Remote Control Keys
                             </div>
-                            <div class="card-desc">Type and execute manual ADB or system command lines on the selected
+                            <div class="card-desc">Simulate key inputs, DPAD navigation, and settings on selected
                                 devices.</div>
                             <div class="card-body">
-                                <div class="terminal-input-col">
-                                    <div>
-                                        <label class="input-label" id="terminalTargetLabel">Target: No devices selected
-                                            (Select sidebar checkboxes)</label>
-                                        <input type="text" id="terminalInput"
-                                            placeholder="Type command (e.g., shell getprop ro.product.model)..."
-                                            style="font-family: monospace;">
-                                    </div>
-                                    <button class="btn btn-primary" id="terminalSendBtn" style="width: 100%;">
-                                        <i class="fa-solid fa-play"></i> Run Command
+                                <div class="remote-row">
+                                    <button class="btn btn-success remote-btn" id="btnScreenOn" title="Wake up screens">
+                                        <i class="fa-solid fa-lightbulb"></i> Screen On
+                                    </button>
+                                    <button class="btn btn-danger remote-btn" id="btnScreenOff" title="Sleep screens">
+                                        <i class="fa-solid fa-moon"></i> Screen Off
+                                    </button>
+                                </div>
+                                <div class="dpad-container">
+                                    <div></div>
+                                    <button class="dpad-btn" id="dpadUp" title="Up"><i
+                                            class="fa-solid fa-chevron-up"></i></button>
+                                    <div></div>
+                                    <button class="dpad-btn" id="dpadLeft" title="Left"><i
+                                            class="fa-solid fa-chevron-left"></i></button>
+                                    <button class="dpad-btn dpad-ok" id="dpadOk" title="OK">OK</button>
+                                    <button class="dpad-btn" id="dpadRight" title="Right"><i
+                                            class="fa-solid fa-chevron-right"></i></button>
+                                    <div></div>
+                                    <button class="dpad-btn" id="dpadDown" title="Down"><i
+                                            class="fa-solid fa-chevron-down"></i></button>
+                                    <div></div>
+                                </div>
+                                <div class="remote-row">
+                                    <button class="btn btn-secondary remote-btn" id="btnBack" title="Back"><i
+                                            class="fa-solid fa-arrow-left"></i> Back</button>
+                                    <button class="btn btn-secondary remote-btn" id="btnHome" title="Home"><i
+                                            class="fa-solid fa-house"></i> Home</button>
+                                    <button class="btn btn-secondary remote-btn" id="btnRecents" title="Recents"><i
+                                            class="fa-solid fa-clone"></i> Recents</button>
+                                </div>
+                                <div class="remote-row">
+                                    <button class="btn btn-secondary remote-btn" id="btnVolUp" title="Volume +"><i
+                                            class="fa-solid fa-volume-high"></i> Vol +</button>
+                                    <button class="btn btn-secondary remote-btn" id="btnMute" title="Mute"><i
+                                            class="fa-solid fa-volume-xmark"></i> Mute</button>
+                                    <button class="btn btn-secondary remote-btn" id="btnVolDown" title="Volume -"><i
+                                            class="fa-solid fa-volume-low"></i> Vol -</button>
+                                </div>
+                                <div class="remote-row">
+                                    <button class="btn btn-secondary remote-btn" id="btnNotifications"
+                                        title="Notifications" style="font-size: 10px; font-weight: 500;">
+                                        <i class="fa-solid fa-bell"></i> Notifications
+                                    </button>
+                                    <button class="btn btn-secondary remote-btn" id="btnQuickSettings"
+                                        title="Quick Settings" style="font-size: 10px; font-weight: 500;">
+                                        <i class="fa-solid fa-sliders"></i> Settings
                                     </button>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="card terminal-card">
+                        <div class="card">
                             <div class="card-title">
-                                <i class="fa-solid fa-square-poll-horizontal"></i> Console Output
+                                <i class="fa-solid fa-circle-info"></i> Step 6: System Info & Settings
                             </div>
-                            <div class="card-desc">Real-time status and execution logs from target devices.</div>
-                            <div class="card-body">
+                            <div class="card-desc">Inspect network configuration and open system Developer Options.
+                            </div>
+                            <div class="card-body" style="gap: 8px;">
+                                <button class="btn btn-secondary" id="btnCheckIp"
+                                    style="width: 100%; justify-content: flex-start;">
+                                    <i class="fa-solid fa-network-wired" style="color: var(--primary);"></i> Check IP
+                                    Address
+                                </button>
+                                <button class="btn btn-secondary" id="btnCheckWifi"
+                                    style="width: 100%; justify-content: flex-start;">
+                                    <i class="fa-solid fa-wifi" style="color: var(--success);"></i> Check Wi-Fi Status
+                                </button>
+                                <button class="btn btn-secondary" id="btnCheckConnectivity"
+                                    style="width: 100%; justify-content: flex-start;">
+                                    <i class="fa-solid fa-globe" style="color: var(--info);"></i> Check Connectivity
+                                </button>
+                                <div
+                                    style="border-top: 1px solid var(--border-color); margin-top: 5px; padding-top: 8px; display: flex; flex-direction: column; gap: 8px;">
+                                    <button class="btn btn-warning" id="btnOpenDevOptions" style="width: 100%;">
+                                        <i class="fa-solid fa-code"></i> Open Developer Options Settings
+                                    </button>
+
+                                    <div class="input-label"
+                                        style="margin-top: 4px; font-size: 11px; margin-bottom: 2px;">Launch TV Service
+                                        Menus</div>
+                                    <button class="btn btn-secondary" id="btnServiceMenuGTV"
+                                        style="width: 100%; font-size: 11px; justify-content: flex-start;">
+                                        <i class="fa-solid fa-tv" style="color: var(--primary);"></i> Google TV (Input →
+                                        L → L → U → D)
+                                    </button>
+                                    <div style="display: flex; gap: 6px;">
+                                        <button class="btn btn-secondary" id="btnServiceMenuSmartA"
+                                            style="flex: 1; font-size: 11px; justify-content: flex-start; padding: 0 8px;"
+                                            title="Menu + 8814 sequence">
+                                            <i class="fa-solid fa-gears" style="color: var(--success);"></i> Smart TV
+                                            (8814)
+                                        </button>
+                                        <button class="btn btn-secondary" id="btnServiceMenuSmartB"
+                                            style="flex: 1; font-size: 11px; justify-content: flex-start; padding: 0 8px;"
+                                            title="Source + 208 sequence">
+                                            <i class="fa-solid fa-gears" style="color: var(--info);"></i> Smart TV (208)
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- Console & Diagnostics Hub Card -->
+                    <div class="card console-hub-card">
+                        <div class="card-title">
+                            <i class="fa-solid fa-terminal"></i> Console & Diagnostics Hub
+                        </div>
+                        <div class="card-desc">Execute manual commands and view real-time status and logs from selected
+                            TVs.</div>
+                        <div class="console-hub-body">
+                            <!-- Left: Input & Inline status -->
+                            <div style="display: flex; flex-direction: column; gap: 10px;">
+                                <div>
+                                    <label class="input-label" id="terminalTargetLabel">Target: No devices selected
+                                        (Select sidebar checkboxes)</label>
+                                    <div style="display: flex; gap: 8px;">
+                                        <input type="text" id="terminalInput"
+                                            placeholder="Type command (e.g., shell getprop ro.product.model)..."
+                                            style="font-family: monospace; flex: 1;">
+                                        <button class="btn btn-primary" id="terminalSendBtn"
+                                            style="height: 38px; padding: 0 16px;">
+                                            <i class="fa-solid fa-play"></i> Run
+                                        </button>
+                                    </div>
+                                </div>
+                                <div style="display: flex; flex-direction: column; flex: 1;">
+                                    <label class="input-label">Operation Status Logs</label>
+                                    <div class="alert-box" id="statusBox"
+                                        style="display: block; margin: 0; flex: 1; min-height: 80px; max-height: 100px; overflow-y: auto; font-size: 12px; background: rgba(255, 255, 255, 0.02); padding: 10px;">
+                                        Ready. Select target devices and trigger actions.
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Right: Terminal output -->
+                            <div style="display: flex; flex-direction: column; gap: 6px;">
+                                <label class="input-label">Real-Time Console Output</label>
                                 <div id="terminalOutput">> Ready. Select devices from sidebar and run commands.</div>
                             </div>
                         </div>
                     </div>
-
-                    <!-- Alert message box for logs -->
-                    <div class="alert-box" id="statusBox" style="width: 48%;"></div>
 
                 </div>
 
@@ -593,7 +744,7 @@
 
                         <!-- Right Column: Open Factory Menu shortcuts & Scrcpy Setup -->
                         <div style="display: flex; flex-direction: column; gap: 20px;">
-                            
+
                             <div class="card factory-codes-card" style="margin-bottom: 0;">
                                 <div class="card-title">
                                     <i class="fa-solid fa-toolbox"></i> Open Factory Menu Shortcuts
@@ -610,7 +761,8 @@
                                                 <i class="fa-solid fa-copy"></i> Copy
                                             </button>
                                         </div>
-                                        <div class="factory-code-sequence">Home → INPUT → LEFT → RIGHT → LEFT → RIGHT → BACK
+                                        <div class="factory-code-sequence">Home → INPUT → LEFT → RIGHT → LEFT → RIGHT →
+                                            BACK
                                         </div>
                                     </div>
 
@@ -618,7 +770,8 @@
                                         <div class="factory-code-header">
                                             <span class="tv-model">Google TV 43, 55</span>
                                             <button class="btn btn-secondary copy-code-btn"
-                                                data-clipboard="INPUT → LEFT → LEFT → UP → DOWN" title="Copy code sequence">
+                                                data-clipboard="INPUT → LEFT → LEFT → UP → DOWN"
+                                                title="Copy code sequence">
                                                 <i class="fa-solid fa-copy"></i> Copy
                                             </button>
                                         </div>
@@ -663,7 +816,8 @@
                                         <div class="factory-code-header">
                                             <span class="tv-model">GTV Alternate 2</span>
                                             <button class="btn btn-secondary copy-code-btn"
-                                                data-clipboard="UP → DOWN → LEFT → RIGHT → OK" title="Copy code sequence">
+                                                data-clipboard="UP → DOWN → LEFT → RIGHT → OK"
+                                                title="Copy code sequence">
                                                 <i class="fa-solid fa-copy"></i> Copy
                                             </button>
                                         </div>
@@ -673,11 +827,13 @@
                             </div>
 
                             <!-- One-Click Auto-Setup Scrcpy Panel -->
-                            <div class="card connection-panel" style="margin-bottom: 0; background: rgba(99, 102, 241, 0.08); border-color: rgba(99, 102, 241, 0.2);">
+                            <div class="card connection-panel"
+                                style="margin-bottom: 0; background: rgba(99, 102, 241, 0.08); border-color: rgba(99, 102, 241, 0.2);">
                                 <div class="card-title" style="color: var(--primary);">
                                     <i class="fa-solid fa-desktop"></i> Screen Mirror Setup
                                 </div>
-                                <div class="card-desc">Click to download and configure Scrcpy mirroring tool PATH automatically.</div>
+                                <div class="card-desc">Click to download and configure Scrcpy mirroring tool PATH
+                                    automatically.</div>
                                 <div class="card-body">
                                     <button class="btn btn-primary" id="autoSetupScrcpyBtn" style="width: 100%;">
                                         Setup Scrcpy (One-Click)

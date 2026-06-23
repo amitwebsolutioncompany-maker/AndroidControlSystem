@@ -21,9 +21,45 @@ const tabPanels = document.querySelectorAll(".tab-panel");
 const ipInput = document.getElementById("ipInput");
 const connectBtn = document.getElementById("connectBtn");
 const usbBtn = document.getElementById("usbBtn");
+const autoNetworkScanBtn = document.getElementById("autoNetworkScanBtn");
 const pairCodeInput = document.getElementById("pairCodeInput");
 const pairBtn = document.getElementById("pairBtn");
 const pairConnectBtn = document.getElementById("pairConnectBtn");
+
+// Step 5 & 6 Column 3 buttons
+const btnScreenOn = document.getElementById("btnScreenOn");
+const btnScreenOff = document.getElementById("btnScreenOff");
+const dpadUp = document.getElementById("dpadUp");
+const dpadDown = document.getElementById("dpadDown");
+const dpadLeft = document.getElementById("dpadLeft");
+const dpadRight = document.getElementById("dpadRight");
+const dpadOk = document.getElementById("dpadOk");
+const btnBack = document.getElementById("btnBack");
+const btnHome = document.getElementById("btnHome");
+const btnRecents = document.getElementById("btnRecents");
+const btnVolUp = document.getElementById("btnVolUp");
+const btnMute = document.getElementById("btnMute");
+const btnVolDown = document.getElementById("btnVolDown");
+const btnNotifications = document.getElementById("btnNotifications");
+const btnQuickSettings = document.getElementById("btnQuickSettings");
+
+const btnCheckIp = document.getElementById("btnCheckIp");
+const btnCheckWifi = document.getElementById("btnCheckWifi");
+const btnCheckConnectivity = document.getElementById("btnCheckConnectivity");
+const btnOpenDevOptions = document.getElementById("btnOpenDevOptions");
+const btnServiceMenuGTV = document.getElementById("btnServiceMenuGTV");
+const btnServiceMenuSmartA = document.getElementById("btnServiceMenuSmartA");
+const btnServiceMenuSmartB = document.getElementById("btnServiceMenuSmartB");
+
+// Security Lockout selectors
+const loginOverlay = document.getElementById("loginOverlay");
+const loginBox = document.getElementById("loginBox");
+const loginPasswordInput = document.getElementById("loginPasswordInput");
+const toggleLoginPasswordBtn = document.getElementById("toggleLoginPasswordBtn");
+const toggleLoginPasswordIcon = document.getElementById("toggleLoginPasswordIcon");
+const loginSubmitBtn = document.getElementById("loginSubmitBtn");
+const loginErrorMessage = document.getElementById("loginErrorMessage");
+const connectedCountBadge = document.getElementById("connectedCountBadge");
 
 // Sidebar Setup Panel
 const autoSetupAdbBtn = document.getElementById("autoSetupAdbBtn");
@@ -71,10 +107,15 @@ function updateTerminalTargetLabel() {
 
 // Loading state helper
 const bulkInteractiveElements = [
-    ipInput, connectBtn, usbBtn, refreshDevicesBtn, selectAllBtn, unselectAllBtn,
+    ipInput, connectBtn, usbBtn, autoNetworkScanBtn, refreshDevicesBtn, selectAllBtn, unselectAllBtn,
     bulkCleanupBtn, bulkInstallBtn, bulkPushBtn, bulkRebootBtn, ...bulkRotateButtons,
     pairCodeInput, pairBtn, pairConnectBtn, autoSetupAdbBtn, autoSetupScrcpyBtn, terminalInput, terminalSendBtn,
-    startAdbServerBtn, killAdbServerBtn, refreshDevicesHeaderBtn
+    startAdbServerBtn, killAdbServerBtn, refreshDevicesHeaderBtn,
+    btnScreenOn, btnScreenOff, dpadUp, dpadDown, dpadLeft, dpadRight, dpadOk,
+    btnBack, btnHome, btnRecents, btnVolUp, btnMute, btnVolDown,
+    btnNotifications, btnQuickSettings, btnCheckIp, btnCheckWifi,
+    btnCheckConnectivity, btnOpenDevOptions, btnServiceMenuGTV, btnServiceMenuSmartA, btnServiceMenuSmartB,
+    loginPasswordInput, loginSubmitBtn, toggleLoginPasswordBtn
 ];
 const fileManagerDeviceSelect = document.getElementById("fileManagerDeviceSelect");
 const fileManagerUpBtn = document.getElementById("fileManagerUpBtn");
@@ -132,6 +173,53 @@ function showStatus(message, type = "info") {
 
 // --- INITIALIZATION ---
 document.addEventListener("DOMContentLoaded", () => {
+    // 0. Security Verification Dialog Logic
+    if (loginOverlay && loginPasswordInput) {
+        // Force focus on password input
+        setTimeout(() => loginPasswordInput.focus(), 100);
+
+        // Toggle password show/hide
+        if (toggleLoginPasswordBtn) {
+            toggleLoginPasswordBtn.addEventListener("click", () => {
+                const isPassword = loginPasswordInput.type === "password";
+                loginPasswordInput.type = isPassword ? "text" : "password";
+                toggleLoginPasswordIcon.className = isPassword ? "fa-solid fa-eye-slash" : "fa-solid fa-eye";
+            });
+        }
+
+        // Submit listener helper
+        const attemptLogin = () => {
+            const password = loginPasswordInput.value;
+            if (password === "amit@0408") {
+                // Correct password -> hide modal
+                loginOverlay.classList.add("hide");
+                loginErrorMessage.style.display = "none";
+            } else {
+                // Incorrect password -> error feedback
+                loginErrorMessage.style.display = "block";
+                loginBox.classList.add("shake");
+                // Clear input
+                loginPasswordInput.value = "";
+                loginPasswordInput.focus();
+                // Remove shake class after animation completes
+                setTimeout(() => {
+                    loginBox.classList.remove("shake");
+                }, 500);
+            }
+        };
+
+        if (loginSubmitBtn) {
+            loginSubmitBtn.addEventListener("click", attemptLogin);
+        }
+
+        loginPasswordInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                attemptLogin();
+            }
+        });
+    }
+
     // 1. Theme Configuration
     const savedTheme = localStorage.getItem("theme") || "dark";
     if (savedTheme === "light") {
@@ -164,6 +252,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // 4. Device Discovery Poll
     pollDevices();
     setInterval(pollDevices, 5000);
+
+    // Auto-discover and connect devices on the same network
+    setTimeout(() => {
+        autoDiscoverConnectNetwork(true);
+    }, 1500);
 
     // 5. Initialize signage checklist & factory menu copy actions
     initChecklist();
@@ -254,6 +347,11 @@ async function pollDevices() {
 }
 
 function renderDevicesChecklist() {
+    // Update connected devices count badge
+    if (connectedCountBadge) {
+        connectedCountBadge.textContent = connectedDevices.length;
+    }
+
     if (connectedDevices.length === 0) {
         devicesChecklist.innerHTML = `
             <div style="text-align: center; color: var(--text-muted); font-size: 12px; margin-top: 20px;">
@@ -421,6 +519,50 @@ usbBtn.addEventListener("click", async () => {
         setBulkControlsLock(false);
     }
 });
+
+// Auto-discover and connect to same network button
+if (autoNetworkScanBtn) {
+    autoNetworkScanBtn.addEventListener("click", () => {
+        autoDiscoverConnectNetwork(false);
+    });
+}
+
+// Auto network discovery scan and connection logic
+async function autoDiscoverConnectNetwork(silent = false) {
+    if (!silent) {
+        showStatus("Scanning local network subnets for ADB enabled devices... Please wait.", "info");
+    }
+    setBulkControlsLock(true);
+
+    try {
+        const result = await window.api.autoDiscoverConnect();
+        if (result.success) {
+            if (result.connectedCount > 0) {
+                const deviceList = result.devices.join(", ");
+                if (!silent) {
+                    showStatus(`Discovery complete! Automatically connected to ${result.connectedCount} device(s): ${deviceList}`, "success");
+                } else {
+                    console.log(`Auto-discovered and connected to ${result.connectedCount} same-network device(s): ${deviceList}`);
+                }
+            } else {
+                if (!silent) {
+                    showStatus("Scan complete. No new same-network devices with open ADB port 5555 detected.", "info");
+                }
+            }
+        } else {
+            if (!silent) {
+                showStatus(`Auto-discovery scan failed: ${result.error}`, "error");
+            }
+        }
+    } catch (err) {
+        if (!silent) {
+            showStatus(`Auto-discovery error: ${err.message || err}`, "error");
+        }
+    } finally {
+        await pollDevices();
+        setBulkControlsLock(false);
+    }
+}
 
 // Pair Device over wireless debugging
 pairBtn.addEventListener("click", async () => {
@@ -816,6 +958,284 @@ bulkRebootBtn.addEventListener("click", async () => {
         setBulkControlsLock(false);
     }
 });
+
+// --- COLUMN 3: REMOTE CONTROL & SYSTEM DIAGNOSTICS BINDINGS ---
+
+// Helper function to send bulk keyevent simulation
+async function sendBulkKeyevent(keycode, label) {
+    const targets = getSelectedTargetsOrWarn();
+    if (!targets) return;
+
+    setBulkControlsLock(true);
+    showStatus(`Sending key event "${label}" (${keycode}) to ${targets.length} device(s)...`, "info");
+
+    try {
+        const result = await window.api.bulkKeyevent(targets, keycode);
+        if (result.success) {
+            let successCount = 0;
+            let msg = `Keyevent "${label}" sent!\n\n`;
+
+            result.results.forEach(res => {
+                const deviceLabel = connectedDevices.find(d => d.id === res.deviceId)?.name || res.deviceId;
+                if (res.success) {
+                    successCount++;
+                    msg += `✓ ${deviceLabel}: Success\n`;
+                    logDeployment(res.deviceId, `Key: ${label}`, "Key event simulated", true);
+                } else {
+                    msg += `✗ ${deviceLabel}: Failed (${res.error})\n`;
+                    logDeployment(res.deviceId, `Key: ${label}`, `Failed: ${res.error}`, false);
+                }
+            });
+            showStatus(msg, successCount === targets.length ? "success" : "info");
+        } else {
+            showStatus(`Operation failed: ${result.error}`, "error");
+        }
+    } catch (err) {
+        showStatus(`Execution error: ${err.message || err}`, "error");
+    } finally {
+        setBulkControlsLock(false);
+    }
+}
+
+// Helper function to send bulk special statusbar commands
+async function sendBulkSpecialCommand(cmdType, label) {
+    const targets = getSelectedTargetsOrWarn();
+    if (!targets) return;
+
+    setBulkControlsLock(true);
+    showStatus(`Sending "${label}" command to ${targets.length} device(s)...`, "info");
+
+    try {
+        const result = await window.api.bulkSpecialCommand(targets, cmdType);
+        if (result.success) {
+            let successCount = 0;
+            let msg = `Command "${label}" executed!\n\n`;
+
+            result.results.forEach(res => {
+                const deviceLabel = connectedDevices.find(d => d.id === res.deviceId)?.name || res.deviceId;
+                if (res.success) {
+                    successCount++;
+                    msg += `✓ ${deviceLabel}: Command sent\n`;
+                    logDeployment(res.deviceId, `Cmd: ${label}`, "Special command sent", true);
+                } else {
+                    msg += `✗ ${deviceLabel}: Failed (${res.error})\n`;
+                    logDeployment(res.deviceId, `Cmd: ${label}`, `Failed: ${res.error}`, false);
+                }
+            });
+            showStatus(msg, successCount === targets.length ? "success" : "info");
+        } else {
+            showStatus(`Operation failed: ${result.error}`, "error");
+        }
+    } catch (err) {
+        showStatus(`Execution error: ${err.message || err}`, "error");
+    } finally {
+        setBulkControlsLock(false);
+    }
+}
+
+// Remote controller buttons click bindings
+btnScreenOn.addEventListener("click", () => sendBulkKeyevent(224, "Screen On (Wakeup)"));
+btnScreenOff.addEventListener("click", () => sendBulkKeyevent(223, "Screen Off (Sleep)"));
+dpadUp.addEventListener("click", () => sendBulkKeyevent(19, "DPAD Up"));
+dpadDown.addEventListener("click", () => sendBulkKeyevent(20, "DPAD Down"));
+dpadLeft.addEventListener("click", () => sendBulkKeyevent(21, "DPAD Left"));
+dpadRight.addEventListener("click", () => sendBulkKeyevent(22, "DPAD Right"));
+dpadOk.addEventListener("click", () => sendBulkKeyevent(23, "DPAD OK"));
+btnBack.addEventListener("click", () => sendBulkKeyevent(4, "Back"));
+btnHome.addEventListener("click", () => sendBulkKeyevent(3, "Home"));
+btnRecents.addEventListener("click", () => sendBulkKeyevent(187, "Recents (App Switch)"));
+btnVolUp.addEventListener("click", () => sendBulkKeyevent(24, "Volume Up"));
+btnVolDown.addEventListener("click", () => sendBulkKeyevent(25, "Volume Down"));
+btnMute.addEventListener("click", () => sendBulkKeyevent(164, "Volume Mute"));
+
+btnNotifications.addEventListener("click", () => sendBulkSpecialCommand("notifications", "Expand Notifications"));
+btnQuickSettings.addEventListener("click", () => sendBulkSpecialCommand("settings", "Expand Settings"));
+
+// Diagnostics and checks bindings
+
+// 1. Check IP address
+btnCheckIp.addEventListener("click", async () => {
+    const targets = getSelectedTargetsOrWarn();
+    if (!targets) return;
+
+    setBulkControlsLock(true);
+    showStatus(`Checking IP address on ${targets.length} device(s)...`, "info");
+
+    try {
+        const result = await window.api.bulkCheckIp(targets);
+        if (result.success) {
+            let successCount = 0;
+            let msg = "IP Address Diagnosis Report:\n\n";
+
+            result.results.forEach(res => {
+                const deviceLabel = connectedDevices.find(d => d.id === res.deviceId)?.name || res.deviceId;
+                if (res.success) {
+                    successCount++;
+                    msg += `✓ ${deviceLabel}: IP Address is ${res.ip}\n`;
+                    logDeployment(res.deviceId, "Check IP", `Found IP: ${res.ip}`, true);
+                } else {
+                    msg += `✗ ${deviceLabel}: Failed to resolve (${res.error})\n`;
+                    logDeployment(res.deviceId, "Check IP", `Failed: ${res.error}`, false);
+                }
+            });
+            showStatus(msg, successCount === targets.length ? "success" : "info");
+        } else {
+            showStatus(`Diagnostics failed: ${result.error}`, "error");
+        }
+    } catch (err) {
+        showStatus(`Execution error: ${err.message || err}`, "error");
+    } finally {
+        setBulkControlsLock(false);
+    }
+});
+
+// 2. Check Wi-Fi status
+btnCheckWifi.addEventListener("click", async () => {
+    const targets = getSelectedTargetsOrWarn();
+    if (!targets) return;
+
+    setBulkControlsLock(true);
+    showStatus(`Querying Wi-Fi configuration on ${targets.length} device(s)...`, "info");
+
+    try {
+        const result = await window.api.bulkCheckWifi(targets);
+        if (result.success) {
+            let successCount = 0;
+            let msg = "Wi-Fi Interface Diagnosis Report:\n\n";
+
+            result.results.forEach(res => {
+                const deviceLabel = connectedDevices.find(d => d.id === res.deviceId)?.name || res.deviceId;
+                if (res.success) {
+                    successCount++;
+                    msg += `✓ ${deviceLabel}: SSID: "${res.ssid}" | Signal: ${res.rssi} (${res.quality})\n`;
+                    logDeployment(res.deviceId, "Check Wi-Fi", `SSID: "${res.ssid}" | Signal: ${res.rssi}`, true);
+                } else {
+                    msg += `✗ ${deviceLabel}: Failed to read dumpsys (${res.error})\n`;
+                    logDeployment(res.deviceId, "Check Wi-Fi", `Failed: ${res.error}`, false);
+                }
+            });
+            showStatus(msg, successCount === targets.length ? "success" : "info");
+        } else {
+            showStatus(`Diagnostics failed: ${result.error}`, "error");
+        }
+    } catch (err) {
+        showStatus(`Execution error: ${err.message || err}`, "error");
+    } finally {
+        setBulkControlsLock(false);
+    }
+});
+
+// 3. Check connectivity (Ping)
+btnCheckConnectivity.addEventListener("click", async () => {
+    const targets = getSelectedTargetsOrWarn();
+    if (!targets) return;
+
+    setBulkControlsLock(true);
+    showStatus(`Pinging 8.8.8.8 from ${targets.length} device(s) to verify connectivity...`, "info");
+
+    try {
+        const result = await window.api.bulkCheckConnectivity(targets);
+        if (result.success) {
+            let successCount = 0;
+            let msg = "Internet Connectivity Diagnosis Report:\n\n";
+
+            result.results.forEach(res => {
+                const deviceLabel = connectedDevices.find(d => d.id === res.deviceId)?.name || res.deviceId;
+                if (res.success) {
+                    successCount++;
+                    msg += `✓ ${deviceLabel}: ${res.status}\n`;
+                    logDeployment(res.deviceId, "Check Connectivity", res.status, true);
+                } else {
+                    msg += `✗ ${deviceLabel}: Offline (${res.status || res.error})\n`;
+                    logDeployment(res.deviceId, "Check Connectivity", `Failed: ${res.status || res.error}`, false);
+                }
+            });
+            showStatus(msg, successCount === targets.length ? "success" : "info");
+        } else {
+            showStatus(`Diagnostics failed: ${result.error}`, "error");
+        }
+    } catch (err) {
+        showStatus(`Execution error: ${err.message || err}`, "error");
+    } finally {
+        setBulkControlsLock(false);
+    }
+});
+
+// 4. Open Developer Options screen
+btnOpenDevOptions.addEventListener("click", async () => {
+    const targets = getSelectedTargetsOrWarn();
+    if (!targets) return;
+
+    setBulkControlsLock(true);
+    showStatus(`Opening Developer Options settings screen on ${targets.length} device(s)...`, "info");
+
+    try {
+        const result = await window.api.bulkOpenDevOptions(targets);
+        if (result.success) {
+            let successCount = 0;
+            let msg = "Developer Options Screen Launch Report:\n\n";
+
+            result.results.forEach(res => {
+                const deviceLabel = connectedDevices.find(d => d.id === res.deviceId)?.name || res.deviceId;
+                if (res.success) {
+                    successCount++;
+                    msg += `✓ ${deviceLabel}: Settings Screen Opened\n`;
+                    logDeployment(res.deviceId, "Open Settings", "Developer Options activity launched", true);
+                } else {
+                    msg += `✗ ${deviceLabel}: Failed (${res.error})\n`;
+                    logDeployment(res.deviceId, "Open Settings", `Failed: ${res.error}`, false);
+                }
+            });
+            showStatus(msg, successCount === targets.length ? "success" : "info");
+        } else {
+            showStatus(`Operation failed: ${result.error}`, "error");
+        }
+    } catch (err) {
+        showStatus(`Execution error: ${err.message || err}`, "error");
+    } finally {
+        setBulkControlsLock(false);
+    }
+});
+
+// Service menu click bindings
+async function openBulkServiceMenu(menuType, label) {
+    const targets = getSelectedTargetsOrWarn();
+    if (!targets) return;
+
+    setBulkControlsLock(true);
+    showStatus(`Sending service menu command "${label}" to ${targets.length} device(s)...`, "info");
+
+    try {
+        const result = await window.api.bulkServiceMenu(targets, menuType);
+        if (result.success) {
+            let successCount = 0;
+            let msg = `${label} sequence simulated!\n\n`;
+
+            result.results.forEach(res => {
+                const deviceLabel = connectedDevices.find(d => d.id === res.deviceId)?.name || res.deviceId;
+                if (res.success) {
+                    successCount++;
+                    msg += `✓ ${deviceLabel}: Success\n`;
+                    logDeployment(res.deviceId, "Service Menu", `${label} simulated`, true);
+                } else {
+                    msg += `✗ ${deviceLabel}: Failed (${res.error})\n`;
+                    logDeployment(res.deviceId, "Service Menu", `Failed: ${res.error}`, false);
+                }
+            });
+            showStatus(msg, successCount === targets.length ? "success" : "info");
+        } else {
+            showStatus(`Operation failed: ${result.error}`, "error");
+        }
+    } catch (err) {
+        showStatus(`Execution error: ${err.message || err}`, "error");
+    } finally {
+        setBulkControlsLock(false);
+    }
+}
+
+btnServiceMenuGTV.addEventListener("click", () => openBulkServiceMenu("gtv", "Google TV Service Menu"));
+btnServiceMenuSmartA.addEventListener("click", () => openBulkServiceMenu("smarta", "Smart TV Menu A (8814)"));
+btnServiceMenuSmartB.addEventListener("click", () => openBulkServiceMenu("smartb", "Smart TV Menu B (208)"));
 
 // --- DEVICE FILE MANAGER TAB ---
 

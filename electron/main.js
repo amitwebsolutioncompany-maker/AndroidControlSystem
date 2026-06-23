@@ -234,6 +234,116 @@ ipcMain.handle("auto-setup-adb", async () => {
     return await adb.autoSetupADB();
 });
 
+// Auto same-network discovery and connection handler
+ipcMain.handle("auto-discover-connect", async () => {
+    return await adb.autoDiscoverAndConnectWiFiDevices();
+});
+
+// Bulk Keyevent simulation (runs in parallel)
+ipcMain.handle("bulk-keyevent", async (event, { deviceIds, keycode }) => {
+    const results = await Promise.all(
+        deviceIds.map(async (id) => {
+            try {
+                const r = await adb.sendKeyevent(id, keycode);
+                return { deviceId: id, success: r.success, error: r.error };
+            } catch (e) {
+                return { deviceId: id, success: false, error: String(e) };
+            }
+        })
+    );
+    return { success: true, results };
+});
+
+// Bulk Special Command simulation (runs in parallel)
+ipcMain.handle("bulk-special-command", async (event, { deviceIds, cmdType }) => {
+    const results = await Promise.all(
+        deviceIds.map(async (id) => {
+            try {
+                const r = await adb.sendSpecialCommand(id, cmdType);
+                return { deviceId: id, success: r.success, error: r.error };
+            } catch (e) {
+                return { deviceId: id, success: false, error: String(e) };
+            }
+        })
+    );
+    return { success: true, results };
+});
+
+// Bulk Check IP Address (runs in parallel)
+ipcMain.handle("bulk-check-ip", async (event, { deviceIds }) => {
+    const results = await Promise.all(
+        deviceIds.map(async (id) => {
+            try {
+                const r = await adb.checkDeviceIp(id);
+                return { deviceId: id, success: r.success, ip: r.ip, error: r.error };
+            } catch (e) {
+                return { deviceId: id, success: false, error: String(e) };
+            }
+        })
+    );
+    return { success: true, results };
+});
+
+// Bulk Check Wi-Fi Status (runs in parallel)
+ipcMain.handle("bulk-check-wifi", async (event, { deviceIds }) => {
+    const results = await Promise.all(
+        deviceIds.map(async (id) => {
+            try {
+                const r = await adb.checkWifiStatus(id);
+                return { deviceId: id, success: r.success, ssid: r.ssid, rssi: r.rssi, quality: r.quality, error: r.error };
+            } catch (e) {
+                return { deviceId: id, success: false, error: String(e) };
+            }
+        })
+    );
+    return { success: true, results };
+});
+
+// Bulk Check Connectivity (runs in parallel)
+ipcMain.handle("bulk-check-connectivity", async (event, { deviceIds }) => {
+    const results = await Promise.all(
+        deviceIds.map(async (id) => {
+            try {
+                const r = await adb.checkConnectivity(id);
+                return { deviceId: id, success: r.success, status: r.status, error: r.error };
+            } catch (e) {
+                return { deviceId: id, success: false, error: String(e) };
+            }
+        })
+    );
+    return { success: true, results };
+});
+
+// Bulk Open Developer Options Settings (runs in parallel)
+ipcMain.handle("bulk-open-dev-options", async (event, { deviceIds }) => {
+    const results = await Promise.all(
+        deviceIds.map(async (id) => {
+            try {
+                const r = await adb.openDeveloperOptions(id);
+                return { deviceId: id, success: r.success, message: r.message, error: r.error };
+            } catch (e) {
+                return { deviceId: id, success: false, error: String(e) };
+            }
+        })
+    );
+    return { success: true, results };
+});
+
+// Bulk Open TV Service Menu (runs in parallel)
+ipcMain.handle("bulk-service-menu", async (event, { deviceIds, menuType }) => {
+    const results = await Promise.all(
+        deviceIds.map(async (id) => {
+            try {
+                const r = await adb.openServiceMenu(id, menuType);
+                return { deviceId: id, success: r.success, error: r.error };
+            } catch (e) {
+                return { deviceId: id, success: false, error: String(e) };
+            }
+        })
+    );
+    return { success: true, results };
+});
+
 // Manual command runner handler
 ipcMain.handle("run-manual-command", async (event, { command, deviceIds }) => {
     if (!deviceIds || deviceIds.length === 0) {
