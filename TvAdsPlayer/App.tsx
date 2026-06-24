@@ -1,0 +1,1513 @@
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  Image,
+  Pressable,
+  BackHandler,
+  ActivityIndicator,
+  StatusBar,
+  AppState,
+  NativeModules,
+  TextInput,
+  ScrollView,
+  Animated,
+  Easing,
+} from 'react-native';
+import RNFS from 'react-native-fs';
+import Video from 'react-native-video';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const { PermissionModule } = NativeModules;
+
+// @ts-ignore
+const TVEventHandler = require('react-native').TVEventHandler;
+
+// Path to target TvAd directory in internal storage (/sdcard/TvAd)
+const ADS_DIR = `${RNFS.ExternalStorageDirectoryPath}/TvAd`;
+
+interface MediaItem {
+  name: string;
+  path: string;
+  type: 'image' | 'video';
+}
+
+const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'];
+const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.mkv', '.avi', '.3gp', '.webm'];
+const DURATION_OPTIONS = [
+  { label: '5 Sec', value: 5000 },
+  { label: '10 Sec', value: 10000 },
+  { label: '15 Sec', value: 15000 },
+  { label: '20 Sec', value: 20000 },
+];
+
+const COLOR_OPTIONS = [
+  { label: 'White', value: '#FFFFFF' },
+  { label: 'Black', value: '#000000' },
+  { label: 'Red', value: '#FF0000' },
+  { label: 'Green', value: '#00FF00' },
+  { label: 'Blue', value: '#0000FF' },
+  { label: 'Yellow', value: '#FFFF00' },
+  { label: 'Cyan', value: '#00FFFF' },
+  { label: 'Magenta', value: '#FF00FF' },
+];
+
+const BG_COLOR_OPTIONS = [
+  { label: 'Black', value: '#000000' },
+  { label: 'White', value: '#FFFFFF' },
+  { label: 'Red', value: '#FF0000' },
+  { label: 'Green', value: '#00FF00' },
+  { label: 'Blue', value: '#0000FF' },
+  { label: 'Yellow', value: '#FFFF00' },
+  { label: 'Gray', value: '#808080' },
+  { label: 'Transparent', value: 'transparent' },
+];
+
+const TICKER_POSITIONS = [
+  { label: 'Top', value: 'top' },
+  { label: 'Bottom', value: 'bottom' },
+];
+
+const FONT_SIZE_OPTIONS = [
+  { label: 'Small', value: 24 },
+  { label: 'Medium', value: 32 },
+  { label: 'Large', value: 40 },
+  { label: 'X-Large', value: 50 },
+  { label: 'XX-Large', value: 60 },
+];
+
+// Config interface
+interface AppConfig {
+  slideDuration: number;
+  tickerText: string;
+  tickerTextColor: string;
+  tickerBgColor: string;
+  tickerPosition: 'top' | 'bottom';
+  tickerFontSize: number;
+  usePendrive: boolean;
+  resizeMode: 'contain' | 'cover' | 'stretch';
+}
+
+const DEFAULT_CONFIG: AppConfig = {
+  slideDuration: 5000,
+  tickerText: '',
+  tickerTextColor: '#FFFFFF',
+  tickerBgColor: '#000000',
+  tickerPosition: 'bottom',
+  tickerFontSize: 16,
+  usePendrive: false,
+  resizeMode: 'stretch',
+};
+
+export default function App() {
+  const [mediaFiles, setMediaFiles] = useState<MediaItem[]>([]);
+  const [currentIndex, setCurrentIndex] = useState<number>(0);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [configOpen, setConfigOpen] = useState<boolean>(false);
+  const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
+  const [resizeMode, setResizeMode] = useState<'contain' | 'cover' | 'stretch'>('stretch');
+  const [errorCount, setErrorCount] = useState<number>(0);
+  const [focusedIndex, setFocusedIndex] = useState<number>(0);
+  const [focusedId, setFocusedId] = useState<string>('');
+  const [showPermissionPopup, setShowPermissionPopup] = useState<boolean>(false);
+  const scrollX = useRef(new Animated.Value(0)).current;
+  const tickerWidth = useRef(0);
+  const [customTextColor, setCustomTextColor] = useState<string>(config.tickerTextColor);
+  const [customBgColor, setCustomBgColor] = useState<string>(config.tickerBgColor);
+
+  // Ticker animation effect
+  useEffect(() => {
+    if (config.tickerText && !configOpen) {
+      const animate = () => {
+        Animated.timing(scrollX, {
+          toValue: -tickerWidth.current,
+          duration: 10000, // 10 seconds for full scroll (medium speed)
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }).start(() => {
+          scrollX.setValue(0);
+          animate();
+        });
+      };
+      animate();
+    }
+    return () => {
+      scrollX.stopAnimation();
+    };
+  }, [config.tickerText, configOpen, scrollX]);
+
+  // Permissions States
+  const [hasStorage, setHasStorage] = useState<boolean>(false);
+  const [permissionsLoaded, setPermissionsLoaded] = useState<boolean>(false);
+
+  // Active resolved ads directory path (internal or USB)
+  const [activeAdsDir, setActiveAdsDir] = useState<string>(ADS_DIR);
+
+  // Load config from AsyncStorage
+  const loadConfig = useCallback(async () => {
+    try {
+      const savedConfig = await AsyncStorage.getItem('tvads_config');
+      if (savedConfig) {
+        const parsed = JSON.parse(savedConfig);
+        setConfig(parsed);
+        setResizeMode(parsed.resizeMode || 'stretch');
+        setCustomTextColor(parsed.tickerTextColor || '#FFFFFF');
+        setCustomBgColor(parsed.tickerBgColor || '#000000');
+      }
+    } catch (e) {
+      console.warn('Failed to load config:', e);
+    }
+  }, []);
+
+  // Save config to AsyncStorage
+  const saveConfig = useCallback(async (newConfig: AppConfig) => {
+    try {
+      await AsyncStorage.setItem('tvads_config', JSON.stringify(newConfig));
+      setConfig(newConfig);
+      setResizeMode(newConfig.resizeMode);
+      setCustomTextColor(newConfig.tickerTextColor);
+      setCustomBgColor(newConfig.tickerBgColor);
+      console.log('Config saved:', newConfig);
+    } catch (e) {
+      console.warn('Failed to save config:', e);
+    }
+  }, []);
+
+  // USB Storage Ads folder auto-detection and fallback
+  const resolveAdsDirectory = useCallback(async () => {
+    console.log('resolveAdsDirectory called with usePendrive:', config.usePendrive);
+    
+    // If pendrive is enabled in config, try to find USB first
+    if (config.usePendrive) {
+      try {
+        // Check common USB mount points for Ads folder
+        const possibleUsbPaths = [
+          '/storage/usb',
+          '/storage/USB',
+          '/storage/usbdisk',
+          '/storage/USBDISK',
+          '/mnt/usb',
+          '/mnt/USB',
+          '/mnt/media_rw',
+          '/sdcard1',
+          '/storage/sdcard1',
+        ];
+
+        console.log('Checking possible USB paths for Ads folder:', possibleUsbPaths);
+
+        for (const usbPath of possibleUsbPaths) {
+          try {
+            const exists = await RNFS.exists(usbPath);
+            console.log('Path exists check:', usbPath, exists);
+            
+            if (exists) {
+              const usbAdsDir = `${usbPath}/Ads`;
+              const adsExists = await RNFS.exists(usbAdsDir);
+              console.log('Ads folder exists at:', usbAdsDir, adsExists);
+              
+              if (adsExists) {
+                const usbFiles = await RNFS.readDir(usbAdsDir);
+                console.log('Files in USB Ads folder:', usbFiles.length);
+                
+                const hasValidMedia = usbFiles.some(f => {
+                  if (f.isFile()) {
+                    const ext = '.' + f.name.split('.').pop()?.toLowerCase();
+                    return IMAGE_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext);
+                  }
+                  return false;
+                });
+                
+                if (hasValidMedia) {
+                  console.log('✓ Using USB pendrive Ads directory:', usbAdsDir);
+                  return usbAdsDir;
+                }
+              }
+            }
+          } catch (pathError) {
+            console.log('Error checking path:', usbPath, pathError);
+          }
+        }
+
+        // Also check /storage for any mounted drives with Ads folder
+        const storageExists = await RNFS.exists('/storage');
+        console.log('/storage exists:', storageExists);
+        
+        if (storageExists) {
+          const storageItems = await RNFS.readDir('/storage');
+          console.log('Storage items:', storageItems.map(i => i.name));
+          
+          for (const item of storageItems) {
+            if (item.isDirectory()) {
+              const name = item.name.toLowerCase();
+              console.log('Checking storage item:', name);
+              
+              // Skip internal emulated storage systems
+              if (name !== 'emulated' && name !== 'self') {
+                const usbAdsDir = `${item.path}/Ads`;
+                const usbAdsExists = await RNFS.exists(usbAdsDir);
+                console.log('Ads folder exists at:', usbAdsDir, usbAdsExists);
+                
+                if (usbAdsExists) {
+                  const usbFiles = await RNFS.readDir(usbAdsDir);
+                  console.log('Files in Ads folder:', usbFiles.length);
+                  
+                  const hasValidMedia = usbFiles.some(f => {
+                    if (f.isFile()) {
+                      const ext = '.' + f.name.split('.').pop()?.toLowerCase();
+                      return IMAGE_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext);
+                    }
+                    return false;
+                  });
+                  
+                  if (hasValidMedia) {
+                    console.log('✓ Using USB pendrive Ads directory from /storage:', usbAdsDir);
+                    return usbAdsDir;
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Error reading TV storage mounts for USB detection:', e);
+      }
+    }
+
+    // Default to internal storage TvAd folder
+    const internalDir = `${RNFS.ExternalStorageDirectoryPath}/TvAd`;
+    const internalExists = await RNFS.exists(internalDir);
+    if (!internalExists) {
+      console.log('TvAd folder does not exist in internal storage, will create if needed');
+      // Don't create folder here - let it be created only when needed
+    }
+    console.log('Using internal storage TvAd directory:', internalDir);
+    return internalDir;
+  }, [config.usePendrive]);
+
+  // Check storage permission
+  const checkStoragePermission = useCallback(async () => {
+    if (!PermissionModule) {
+      setHasStorage(true);
+      setPermissionsLoaded(true);
+      return;
+    }
+    try {
+      const storageGranted = await PermissionModule.checkStoragePermission();
+      setHasStorage(storageGranted);
+      
+      // Show permission popup if permission is not granted
+      if (!storageGranted) {
+        setShowPermissionPopup(true);
+      }
+    } catch (e) {
+      console.warn('Storage permission query failed:', e);
+      setShowPermissionPopup(true);
+    } finally {
+      setPermissionsLoaded(true);
+    }
+  }, []);
+
+  // Request storage permission
+  const requestPermission = useCallback(async () => {
+    if (!PermissionModule) return;
+    try {
+      await PermissionModule.requestStoragePermission();
+      // Recheck permission after request
+      setTimeout(async () => {
+        const granted = await PermissionModule.checkStoragePermission();
+        setHasStorage(granted);
+        if (granted) {
+          setShowPermissionPopup(false);
+        }
+      }, 1000);
+    } catch (e) {
+      console.warn('Failed to request storage permission:', e);
+    }
+  }, []);
+
+  // Check permissions on mount and when app returns from settings screen
+  useEffect(() => {
+    checkStoragePermission();
+    loadConfig();
+
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        checkStoragePermission();
+        loadConfig();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [checkStoragePermission, loadConfig]);
+
+  // Scan and load media files
+  const scanFolder = useCallback(async () => {
+    setLoading(true);
+    setErrorCount(0);
+    try {
+      console.log('Scanning folder with usePendrive:', config.usePendrive);
+      const resolvedDir = await resolveAdsDirectory();
+      setActiveAdsDir(resolvedDir);
+      console.log('Resolved directory:', resolvedDir);
+
+      // Check if directory exists before reading
+      const dirExists = await RNFS.exists(resolvedDir);
+      if (!dirExists) {
+        console.log('Directory does not exist, creating it:', resolvedDir);
+        await RNFS.mkdir(resolvedDir);
+      }
+
+      const files = await RNFS.readDir(resolvedDir);
+      const list: MediaItem[] = [];
+
+      files.forEach((file) => {
+        if (file.isFile()) {
+          const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+          if (IMAGE_EXTENSIONS.includes(ext)) {
+            list.push({
+              name: file.name,
+              path: file.path,
+              type: 'image',
+            });
+          } else if (VIDEO_EXTENSIONS.includes(ext)) {
+            list.push({
+              name: file.name,
+              path: file.path,
+              type: 'video',
+            });
+          }
+        }
+      });
+
+      // Sort alphabetically so sorting remains consistent
+      list.sort((a, b) => a.name.localeCompare(b.name));
+
+      console.log('Found media files:', list.length);
+      setMediaFiles(list);
+      setCurrentIndex(0);
+    } catch (err) {
+      console.warn('Error reading Ads directory:', err);
+      setMediaFiles([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [config.usePendrive, resolveAdsDirectory]);
+
+  // Initial scan triggered only when storage permission is verified or config changes
+  useEffect(() => {
+    if (permissionsLoaded && hasStorage) {
+      scanFolder();
+    }
+  }, [permissionsLoaded, hasStorage, scanFolder, config.usePendrive]);
+
+  // Additional effect to rescan when pendrive setting changes
+  useEffect(() => {
+    if (permissionsLoaded && hasStorage) {
+      console.log('Pendrive setting changed, rescanning folder');
+      scanFolder();
+    }
+  }, [config.usePendrive]);
+
+  // Handle D-pad Menu, D-pad Up or OK to open config settings
+  useEffect(() => {
+    if (typeof TVEventHandler === 'undefined' || !TVEventHandler) {
+      console.warn('TVEventHandler is not defined in this React Native core build. Falling back to focus-based Pressable triggers.');
+      return;
+    }
+    try {
+      const tvEventHandler = new TVEventHandler();
+      tvEventHandler.enable(null, (_cmp: any, evt: any) => {
+        console.log('TV Event:', evt);
+        // Handle multiple event types for different TV remotes
+        if (evt && (
+          evt.eventType === 'select' ||
+          evt.eventType === 'playPause' ||
+          evt.eventType === 'menu' ||
+          evt.eventType === 'longPressSelect' ||
+          evt.eventType === 'down'
+        )) {
+          // OK/Menu/Down button opens config settings
+          if (!configOpen) {
+            setConfigOpen(true);
+            setFocusedIndex(0);
+          }
+        }
+      });
+
+      return () => {
+        tvEventHandler.disable();
+      };
+    } catch (e) {
+      console.warn('Could not initialize TVEventHandler:', e);
+    }
+  }, [configOpen]);
+
+  // Back button closes config menu
+  useEffect(() => {
+    const backAction = () => {
+      console.log('Back pressed - configOpen:', configOpen);
+      if (configOpen) {
+        setConfigOpen(false);
+        return true; // prevent default back press
+      }
+      return false; // exit app normally
+    };
+
+    const backHandler = BackHandler.addEventListener(
+      'hardwareBackPress',
+      backAction
+    );
+
+    return () => backHandler.remove();
+  }, [configOpen]);
+
+  // Play next file in queue
+  const playNext = useCallback(() => {
+    if (mediaFiles.length <= 1) {
+      // Loop same item (reset index to reload)
+      setCurrentIndex((prev) => (prev === 0 ? -1 : 0));
+      setTimeout(() => setCurrentIndex(0), 100);
+      return;
+    }
+    setCurrentIndex((prev) => (prev + 1) % mediaFiles.length);
+  }, [mediaFiles]);
+
+  // Handle image timer
+  useEffect(() => {
+    if (mediaFiles.length === 0 || configOpen || loading) return;
+
+    const currentMedia = mediaFiles[currentIndex === -1 ? 0 : currentIndex];
+    if (currentMedia && currentMedia.type === 'image') {
+      const timer = setTimeout(() => {
+        playNext();
+      }, config.slideDuration);
+
+      return () => clearTimeout(timer);
+    }
+  }, [currentIndex, mediaFiles, config.slideDuration, configOpen, loading, playNext]);
+
+  // Handle media errors gracefully to prevent player stuck screen
+  const handleMediaError = () => {
+    console.warn('Error loading file: ' + mediaFiles[currentIndex]?.name);
+    setErrorCount((prev) => prev + 1);
+    
+    // If consecutive errors exceed the total count, avoid fast-spinning loop
+    if (errorCount < mediaFiles.length) {
+      setTimeout(() => {
+        playNext();
+      }, 2500);
+    }
+  };
+
+  // Render permission popup if permission is missing
+  if (showPermissionPopup && !hasStorage) {
+    return (
+      <View style={styles.darkContainer}>
+        <StatusBar hidden />
+        <View style={styles.wizardCard}>
+          <Text style={styles.wizardEmoji}>📁</Text>
+          <Text style={styles.wizardTitle}>File Access Required</Text>
+          <Text style={styles.wizardDesc}>
+            Please allow access to manage all files to play advertisements from storage.
+          </Text>
+
+          <Pressable
+            focusable
+            hasTVPreferredFocus={true}
+            onPress={requestPermission}
+            style={({ pressed, focused }: any) => [
+              styles.btn,
+              focused && styles.btnFocused,
+              pressed && styles.btnPressed,
+              { marginTop: 12, minWidth: 200 }
+            ]}
+          >
+            <Text style={styles.btnText}>Grant Permission</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  if (loading) {
+    return (
+      <View style={styles.darkContainer}>
+        <StatusBar hidden />
+        <ActivityIndicator size="large" color="#6366f1" />
+        <Text style={styles.statusText}>Scanning storage for Ads...</Text>
+      </View>
+    );
+  }
+
+  // Render instructions screen if folder is empty or not readable
+  if (mediaFiles.length === 0) {
+    return (
+      <View style={styles.darkContainer}>
+        <StatusBar hidden />
+        <View style={styles.instructionCard}>
+          <Text style={styles.emojiTitle}>📺</Text>
+          <Text style={styles.titleText}>TV Ads Player</Text>
+          <Text style={styles.subtitleText}>No Media Files Found</Text>
+          
+          <View style={styles.pathBox}>
+            <Text style={styles.pathLabel}>Directory to place files:</Text>
+            <Text style={styles.pathText}>{activeAdsDir}</Text>
+          </View>
+          
+          <Text style={styles.infoText}>
+            Please copy images (.jpg, .png, .webp, .gif, .bmp) or videos (.mp4, .mkv, .mov, etc.) into the 'TvAd' folder in your internal main storage and try again.
+          </Text>
+
+          <Pressable
+            onPress={scanFolder}
+            style={({ pressed, focused }: any) => [
+              styles.btn,
+              focused && styles.btnFocused,
+              pressed && styles.btnPressed,
+            ]}
+          >
+            <Text style={styles.btnText}>Reload / Scan Folder</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  const currentMedia = mediaFiles[currentIndex === -1 ? 0 : currentIndex];
+
+  return (
+    <View style={styles.viewerContainer}>
+      <StatusBar hidden />
+      
+      {/* Fullscreen Player */}
+      {currentMedia && (
+        <View style={styles.mediaContainer}>
+          {/* Top Ticker */}
+          {(() => {
+            console.log('Ticker check - position:', config.tickerPosition, 'text:', config.tickerText);
+            return config.tickerPosition === 'top' && config.tickerText;
+          })() && (
+            <View style={[styles.tickerBar, config.tickerBgColor !== 'transparent' && { backgroundColor: config.tickerBgColor }, styles.tickerBarTop]}>
+              <Animated.View 
+                style={[styles.tickerScrollContainer, { transform: [{ translateX: scrollX }] }]}
+                onLayout={(e) => {
+                  tickerWidth.current = e.nativeEvent.layout.width;
+                }}
+              >
+                <Animated.Text
+                  style={[styles.tickerText, { color: config.tickerTextColor, fontSize: config.tickerFontSize }]}
+                  onLayout={(e) => {
+                    tickerWidth.current = e.nativeEvent.layout.width;
+                  }}
+                >
+                  {config.tickerText}
+                </Animated.Text>
+              </Animated.View>
+            </View>
+          )}
+          
+          {/* Media Player */}
+          <Pressable
+            focusable={!configOpen}
+            hasTVPreferredFocus={!configOpen}
+            style={styles.mediaWrapper}
+            onPress={() => {
+              // Tap on media also opens config
+              if (!configOpen) {
+                setConfigOpen(true);
+                setFocusedIndex(0);
+              }
+            }}
+          >
+            {currentMedia.type === 'video' ? (
+              <Video
+                source={{ uri: `file://${currentMedia.path}` }}
+                style={styles.fullscreenMedia}
+                resizeMode="stretch"
+                repeat={mediaFiles.length === 1}
+                paused={configOpen}
+                onEnd={playNext}
+                onError={handleMediaError}
+              />
+            ) : (
+              <Image
+                source={{ uri: `file://${currentMedia.path}` }}
+                style={styles.fullscreenMedia}
+                resizeMode="stretch"
+                onError={handleMediaError}
+              />
+            )}
+          </Pressable>
+
+          {/* Bottom Ticker */}
+          {(() => {
+            console.log('Bottom ticker check - position:', config.tickerPosition, 'text:', config.tickerText);
+            return config.tickerPosition === 'bottom' && config.tickerText;
+          })() && (
+            <View style={[styles.tickerBar, config.tickerBgColor !== 'transparent' && { backgroundColor: config.tickerBgColor }, styles.tickerBarBottom]}>
+              <Animated.View 
+                style={[styles.tickerScrollContainer, { transform: [{ translateX: scrollX }] }]}
+                onLayout={(e) => {
+                  tickerWidth.current = e.nativeEvent.layout.width;
+                }}
+              >
+                <Animated.Text
+                  style={[styles.tickerText, { color: config.tickerTextColor, fontSize: config.tickerFontSize }]}
+                  onLayout={(e) => {
+                    tickerWidth.current = e.nativeEvent.layout.width;
+                  }}
+                >
+                  {config.tickerText}
+                </Animated.Text>
+              </Animated.View>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Config Settings Full Screen Page */}
+      {configOpen && (
+        <View style={styles.configPage}>
+          <Text style={styles.configPageHeader}>⚙️ Configuration Settings</Text>
+
+          <ScrollView 
+            style={styles.configPageScroll}
+            keyboardShouldPersistTaps="handled"
+            focusable={true}
+            contentContainerStyle={styles.configPageContent}
+          >
+              {/* Slide Duration */}
+              <View style={styles.settingSectionSingle}>
+                <Text style={styles.sectionTitle}>Image Slide Duration:</Text>
+                <View style={styles.singleColumn}>
+                  {DURATION_OPTIONS.map((opt, idx) => (
+                    <Pressable
+                      key={opt.value}
+                      id={`duration-${opt.value}`}
+                      focusable={true}
+                      hasTVPreferredFocus={idx === 0}
+                      onFocus={() => setFocusedId(`duration-${opt.value}`)}
+                      onBlur={() => setFocusedId('')}
+                      onPress={() => {
+                        setConfig({ ...config, slideDuration: opt.value });
+                        setFocusedIndex(idx);
+                      }}
+                      style={({ pressed, focused }: any) => [
+                        styles.choiceBtnSingle,
+                        config.slideDuration === opt.value && styles.choiceActive,
+                        (focused || focusedId === `duration-${opt.value}`) && styles.btnFocused,
+                        pressed && styles.btnPressed,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.choiceText,
+                          config.slideDuration === opt.value && styles.choiceTextActive,
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              {/* Ticker Text */}
+              <View style={styles.settingSectionSingle}>
+                <Text style={styles.sectionTitle}>Ticker Text:</Text>
+                <TextInput
+                  id="ticker-text"
+                  style={styles.textInput}
+                  value={config.tickerText}
+                  onChangeText={(text) => setConfig({ ...config, tickerText: text })}
+                  placeholder="Enter ticker text..."
+                  placeholderTextColor="#64748b"
+                  multiline={false}
+                  focusable={true}
+                  selectTextOnFocus={true}
+                  onFocus={() => setFocusedId('ticker-text')}
+                  onBlur={() => setFocusedId('')}
+                />
+              </View>
+
+              {/* Ticker Text Color */}
+              <View style={styles.settingSectionSingle}>
+                <Text style={styles.sectionTitle}>Ticker Text Color:</Text>
+                <View style={styles.colorGrid}>
+                  {COLOR_OPTIONS.map((color) => (
+                    <Pressable
+                      key={color.value}
+                      id={`textcolor-${color.value}`}
+                      focusable={true}
+                      onFocus={() => setFocusedId(`textcolor-${color.value}`)}
+                      onBlur={() => setFocusedId('')}
+                      onPress={() => {
+                        setConfig({ ...config, tickerTextColor: color.value });
+                        setCustomTextColor(color.value);
+                      }}
+                      style={({ pressed, focused }: any) => [
+                        styles.colorBtn,
+                        config.tickerTextColor === color.value && styles.colorActive,
+                        (focused || focusedId === `textcolor-${color.value}`) && styles.btnFocused,
+                        pressed && styles.btnPressed,
+                        { backgroundColor: color.value },
+                      ]}
+                    />
+                  ))}
+                </View>
+                <TextInput
+                  id="textcolor-hex"
+                  style={styles.hexInput}
+                  value={customTextColor}
+                  onChangeText={(text) => {
+                    setCustomTextColor(text);
+                    if (/^#[0-9A-Fa-f]{6}$/.test(text)) {
+                      setConfig({ ...config, tickerTextColor: text });
+                    }
+                  }}
+                  placeholder="#FFFFFF"
+                  placeholderTextColor="#64748b"
+                  maxLength={7}
+                  focusable={true}
+                  selectTextOnFocus={true}
+                  onFocus={() => setFocusedId('textcolor-hex')}
+                  onBlur={() => setFocusedId('')}
+                />
+              </View>
+
+              {/* Ticker Background Color */}
+              <View style={styles.settingSectionSingle}>
+                <Text style={styles.sectionTitle}>Ticker Background Color:</Text>
+                <View style={styles.colorGrid}>
+                  {BG_COLOR_OPTIONS.map((color) => (
+                    <Pressable
+                      key={color.value}
+                      id={`bgcolor-${color.value}`}
+                      focusable={true}
+                      onFocus={() => setFocusedId(`bgcolor-${color.value}`)}
+                      onBlur={() => setFocusedId('')}
+                      onPress={() => {
+                        setConfig({ ...config, tickerBgColor: color.value });
+                        setCustomBgColor(color.value);
+                      }}
+                      style={({ pressed, focused }: any) => [
+                        styles.colorBtn,
+                        config.tickerBgColor === color.value && styles.colorActive,
+                        (focused || focusedId === `bgcolor-${color.value}`) && styles.btnFocused,
+                        pressed && styles.btnPressed,
+                        { backgroundColor: color.value === 'transparent' ? '#333' : color.value },
+                      ]}
+                    >
+                      {color.value === 'transparent' && (
+                        <Text style={styles.transparentLabel}>T</Text>
+                      )}
+                    </Pressable>
+                  ))}
+                </View>
+                <TextInput
+                  id="bgcolor-hex"
+                  style={styles.hexInput}
+                  value={customBgColor}
+                  onChangeText={(text) => {
+                    setCustomBgColor(text);
+                    if (/^#[0-9A-Fa-f]{6}$/.test(text) || text === 'transparent') {
+                      setConfig({ ...config, tickerBgColor: text });
+                    }
+                  }}
+                  placeholder="#000000"
+                  placeholderTextColor="#64748b"
+                  maxLength={11}
+                  focusable={true}
+                  selectTextOnFocus={true}
+                  onFocus={() => setFocusedId('bgcolor-hex')}
+                  onBlur={() => setFocusedId('')}
+                />
+              </View>
+
+              {/* Ticker Position */}
+              <View style={styles.settingSectionSingle}>
+                <Text style={styles.sectionTitle}>Ticker Position:</Text>
+                <View style={styles.singleColumn}>
+                  {TICKER_POSITIONS.map((pos) => (
+                    <Pressable
+                      key={pos.value}
+                      id={`position-${pos.value}`}
+                      focusable={true}
+                      onFocus={() => setFocusedId(`position-${pos.value}`)}
+                      onBlur={() => setFocusedId('')}
+                      onPress={() => setConfig({ ...config, tickerPosition: pos.value as 'top' | 'bottom' })}
+                      style={({ pressed, focused }: any) => [
+                        styles.choiceBtnSingle,
+                        config.tickerPosition === pos.value && styles.choiceActive,
+                        (focused || focusedId === `position-${pos.value}`) && styles.btnFocused,
+                        pressed && styles.btnPressed,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.choiceText,
+                          config.tickerPosition === pos.value && styles.choiceTextActive,
+                        ]}
+                      >
+                        {pos.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              {/* Ticker Font Size */}
+              <View style={styles.settingSectionSingle}>
+                <Text style={styles.sectionTitle}>Ticker Font Size:</Text>
+                <View style={styles.singleColumn}>
+                  {FONT_SIZE_OPTIONS.map((size) => (
+                    <Pressable
+                      key={size.value}
+                      id={`fontsize-${size.value}`}
+                      focusable={true}
+                      onFocus={() => setFocusedId(`fontsize-${size.value}`)}
+                      onBlur={() => setFocusedId('')}
+                      onPress={() => setConfig({ ...config, tickerFontSize: size.value })}
+                      style={({ pressed, focused }: any) => [
+                        styles.choiceBtnSingle,
+                        config.tickerFontSize === size.value && styles.choiceActive,
+                        (focused || focusedId === `fontsize-${size.value}`) && styles.btnFocused,
+                        pressed && styles.btnPressed,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.choiceText,
+                          config.tickerFontSize === size.value && styles.choiceTextActive,
+                        ]}
+                      >
+                        {size.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              {/* Pendrive Option */}
+              <View style={styles.settingSectionSingle}>
+                <Text style={styles.sectionTitle}>Use Pendrive (USB) for Ads:</Text>
+                <View style={styles.singleColumn}>
+                  <Pressable
+                    id="pendrive-on"
+                    focusable={true}
+                    onFocus={() => setFocusedId('pendrive-on')}
+                    onBlur={() => setFocusedId('')}
+                    onPress={() => setConfig({ ...config, usePendrive: true })}
+                    style={({ pressed, focused }: any) => [
+                      styles.choiceBtnSingle,
+                      config.usePendrive && styles.choiceActive,
+                      (focused || focusedId === 'pendrive-on') && styles.btnFocused,
+                      pressed && styles.btnPressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.choiceText,
+                        config.usePendrive && styles.choiceTextActive,
+                      ]}
+                    >
+                      ON
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    id="pendrive-off"
+                    focusable={true}
+                    onFocus={() => setFocusedId('pendrive-off')}
+                    onBlur={() => setFocusedId('')}
+                    onPress={() => setConfig({ ...config, usePendrive: false })}
+                    style={({ pressed, focused }: any) => [
+                      styles.choiceBtnSingle,
+                      !config.usePendrive && styles.choiceActive,
+                      (focused || focusedId === 'pendrive-off') && styles.btnFocused,
+                      pressed && styles.btnPressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.choiceText,
+                        !config.usePendrive && styles.choiceTextActive,
+                      ]}
+                    >
+                      OFF
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* Actions Row */}
+              <View style={styles.actionRowSingle}>
+                <Pressable
+                  id="save-btn"
+                  focusable={true}
+                  onFocus={() => setFocusedId('save-btn')}
+                  onBlur={() => setFocusedId('')}
+                  onPress={() => {
+                    saveConfig(config);
+                    setConfigOpen(false);
+                    scanFolder();
+                  }}
+                  style={({ pressed, focused }: any) => [
+                    styles.btnPrimarySingle,
+                    (focused || focusedId === 'save-btn') && styles.btnFocused,
+                    pressed && styles.btnPressed,
+                  ]}
+                >
+                  <Text style={styles.btnText}>💾 Save & Close</Text>
+                </Pressable>
+
+                <Pressable
+                  id="cancel-btn"
+                  focusable={true}
+                  onFocus={() => setFocusedId('cancel-btn')}
+                  onBlur={() => setFocusedId('')}
+                  onPress={() => setConfigOpen(false)}
+                  style={({ pressed, focused }: any) => [
+                    styles.btnSecondarySingle,
+                    (focused || focusedId === 'cancel-btn') && styles.btnFocused,
+                    pressed && styles.btnPressed,
+                  ]}
+                >
+                  <Text style={styles.btnText}>❌ Cancel</Text>
+                </Pressable>
+              </View>
+
+              <Text style={styles.hintFooter}>
+                Use remote D-pad to navigate. Press BACK to dismiss.
+              </Text>
+            </ScrollView>
+          </View>
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  darkContainer: {
+    flex: 1,
+    backgroundColor: '#0c0d12',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  statusText: {
+    marginTop: 16,
+    color: '#94a3b8',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  instructionCard: {
+    width: '80%',
+    backgroundColor: '#171923',
+    borderRadius: 16,
+    padding: 32,
+    borderWidth: 1,
+    borderColor: '#2d3748',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  emojiTitle: {
+    fontSize: 48,
+    marginBottom: 8,
+  },
+  titleText: {
+    fontSize: 24,
+    color: '#f8fafc',
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
+  },
+  subtitleText: {
+    fontSize: 16,
+    color: '#ef4444',
+    fontWeight: '600',
+    marginTop: 4,
+    marginBottom: 16,
+  },
+  pathBox: {
+    width: '100%',
+    backgroundColor: '#0d0e15',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  pathLabel: {
+    color: '#64748b',
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  pathText: {
+    color: '#38bdf8',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginTop: 2,
+  },
+  infoText: {
+    fontSize: 13,
+    color: '#94a3b8',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 24,
+  },
+  viewerContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  mediaWrapper: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullscreenMedia: {
+    width: '100%',
+    height: '100%',
+  },
+  okButton: {
+    position: 'absolute',
+    bottom: 40,
+    left: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderWidth: 2,
+    borderColor: '#3f3f46',
+    zIndex: 20,
+  },
+  okButtonFocused: {
+    borderColor: '#3b82f6',
+    borderWidth: 4,
+    transform: [{ scale: 1.05 }],
+  },
+  okButtonPressed: {
+    opacity: 0.8,
+  },
+  okButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  overlayBg: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  settingsDialog: {
+    width: '60%',
+    backgroundColor: '#131520',
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#3f3f46',
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.5,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  settingsHeader: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#f4f4f5',
+    marginBottom: 18,
+    textAlign: 'center',
+  },
+  settingSection: {
+    marginBottom: 20,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    color: '#a1a1aa',
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  durationGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  choiceBtn: {
+    flex: 1,
+    backgroundColor: '#27272a',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  choiceBtnCompact: {
+    flex: 1,
+    minWidth: '30%',
+    backgroundColor: '#27272a',
+    borderRadius: 8,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  choiceActive: {
+    backgroundColor: '#3f3f46',
+    borderColor: '#6366f1',
+  },
+  choiceText: {
+    color: '#a1a1aa',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  choiceTextActive: {
+    color: '#ffffff',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    gap: 16,
+  },
+  btn: {
+    backgroundColor: '#6366f1',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  btnPrimary: {
+    flex: 1,
+    backgroundColor: '#6366f1',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  btnSecondary: {
+    flex: 1,
+    backgroundColor: '#27272a',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#3f3f46',
+  },
+  btnFocused: {
+    borderColor: '#60a5fa',
+    borderWidth: 5,
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+    transform: [{ scale: 1.03 }],
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  btnPressed: {
+    opacity: 0.8,
+  },
+  mediaContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+    position: 'relative',
+  },
+  settingsButton: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderWidth: 2,
+    borderColor: '#3f3f46',
+    zIndex: 10,
+  },
+  settingsButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  tickerBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    zIndex: 10,
+    backgroundColor: 'transparent',
+  },
+  tickerBarTop: {
+    top: 0,
+  },
+  tickerBarBottom: {
+    bottom: 0,
+  },
+  tickerScrollContainer: {
+    flexDirection: 'row',
+  },
+  tickerText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  configDialog: {
+    width: '65%',
+    maxHeight: '80%',
+    backgroundColor: '#131520',
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#3f3f46',
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.5,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  configHeader: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#f4f4f5',
+    marginBottom: 18,
+    textAlign: 'center',
+  },
+  configScroll: {
+    maxHeight: 400,
+    marginBottom: 16,
+  },
+  textInput: {
+    backgroundColor: '#27272a',
+    color: '#f4f4f5',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    borderWidth: 2,
+    borderColor: '#3f3f46',
+  },
+  hexInput: {
+    backgroundColor: '#27272a',
+    color: '#f4f4f5',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    borderWidth: 2,
+    borderColor: '#3f3f46',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  colorGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  colorBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  colorActive: {
+    borderColor: '#3b82f6',
+    borderWidth: 3,
+  },
+  transparentLabel: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  btnText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  hintFooter: {
+    fontSize: 10,
+    color: '#71717a',
+    textAlign: 'center',
+    marginTop: 18,
+  },
+  configPage: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#131520',
+  },
+  configPageHeader: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#f4f4f5',
+    marginBottom: 20,
+    textAlign: 'center',
+    marginTop: 20,
+  },
+  configPageScroll: {
+    flex: 1,
+  },
+  configPageContent: {
+    paddingHorizontal: 32,
+    paddingBottom: 40,
+  },
+  settingSectionSingle: {
+    marginBottom: 24,
+  },
+  singleColumn: {
+    flexDirection: 'column',
+    gap: 12,
+  },
+  choiceBtnSingle: {
+    width: '100%',
+    backgroundColor: '#27272a',
+    borderRadius: 8,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  actionRowSingle: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 24,
+    gap: 16,
+  },
+  btnPrimarySingle: {
+    flex: 1,
+    backgroundColor: '#6366f1',
+    borderRadius: 8,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  btnSecondarySingle: {
+    flex: 1,
+    backgroundColor: '#27272a',
+    borderRadius: 8,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#3f3f46',
+  },
+  wizardCard: {
+    width: '85%',
+    backgroundColor: '#171923',
+    borderRadius: 16,
+    padding: 24,
+    borderWidth: 1.5,
+    borderColor: '#2d3748',
+    alignItems: 'center',
+  },
+  wizardEmoji: {
+    fontSize: 40,
+    marginBottom: 8,
+  },
+  wizardTitle: {
+    fontSize: 22,
+    color: '#f8fafc',
+    fontWeight: 'bold',
+    marginBottom: 6,
+  },
+  wizardDesc: {
+    fontSize: 12,
+    color: '#94a3b8',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 20,
+    paddingHorizontal: 16,
+  },
+  permRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#0d0e15',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  permInfo: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  permTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#f8fafc',
+    marginBottom: 3,
+  },
+  permText: {
+    fontSize: 10,
+    color: '#64748b',
+    lineHeight: 14,
+  },
+  permBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    minWidth: 90,
+    alignItems: 'center',
+  },
+  permBtnAction: {
+    backgroundColor: '#6366f1',
+  },
+  permBtnSuccess: {
+    backgroundColor: '#10b981',
+  },
+  permBtnInfo: {
+    backgroundColor: '#3b82f6',
+  },
+  permBtnText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  wizardContinueBtn: {
+    width: '100%',
+    backgroundColor: '#6366f1',
+    borderRadius: 8,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  wizardContinueBtnDisabled: {
+    backgroundColor: '#1e293b',
+    opacity: 0.5,
+  },
+  wizardContinueBtnText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
+});

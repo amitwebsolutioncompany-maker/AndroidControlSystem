@@ -104,3 +104,24 @@ downloads/
 # Build artifacts
 
 *.tsbuildinfo
+
+# TvAdsPlayer
+TvAdsPlayer/node_modules/
+TvAdsPlayer/android/.gradle/
+TvAdsPlayer/android/build/
+TvAdsPlayer/android/app/build/
+TvAdsPlayer/android/app/.cxx/
+TvAdsPlayer/android/local.properties
+TvAdsPlayer/ios/build/
+TvAdsPlayer/ios/Pods/
+TvAdsPlayer/ios/.xcode.env.local
+TvAdsPlayer/.bundle/
+
+# C Projects / Intermediate compilation folder
+c/
+
+# IDE and temporary settings
+*.swp
+*.swo 
+.vscode/
+*.user 

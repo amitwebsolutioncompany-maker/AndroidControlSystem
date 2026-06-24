@@ -259,7 +259,8 @@ async function rebootDevice(deviceId) {
 // List files on device at path
 async function listFiles(deviceId, remotePath) {
   const targetPath = remotePath || "/sdcard/";
-  const res = await runAdb(deviceId, `shell ls -la "${targetPath}"`);
+  const escapedPath = targetPath.replace(/"/g, '\\"');
+  const res = await runAdb(deviceId, `shell ls -la "${escapedPath}"`);
   if (!res.success) {
     return { success: false, error: res.error || res.stdout || "Failed to list directories." };
   }
@@ -302,7 +303,8 @@ async function listFiles(deviceId, remotePath) {
 
 // Delete file/folder on device
 async function deletePath(deviceId, remotePath, isDir) {
-  const cmd = isDir ? `shell rm -rf "${remotePath}"` : `shell rm -f "${remotePath}"`;
+  const escapedPath = remotePath.replace(/"/g, '\\"');
+  const cmd = `shell rm -rf "${escapedPath}"`;
   const res = await runAdb(deviceId, cmd);
   if (res.success) {
     return { success: true, message: "Deleted successfully." };
@@ -313,7 +315,9 @@ async function deletePath(deviceId, remotePath, isDir) {
 
 // Rename/move file/folder on device
 async function renamePath(deviceId, oldPath, newPath) {
-  const res = await runAdb(deviceId, `shell mv "${oldPath}" "${newPath}"`);
+  const escapedOld = oldPath.replace(/"/g, '\\"');
+  const escapedNew = newPath.replace(/"/g, '\\"');
+  const res = await runAdb(deviceId, `shell mv "${escapedOld}" "${escapedNew}"`);
   if (res.success) {
     return { success: true, message: "Renamed/moved successfully." };
   } else {
@@ -323,7 +327,8 @@ async function renamePath(deviceId, oldPath, newPath) {
 
 // Create directory on device
 async function createFolder(deviceId, remotePath) {
-  const res = await runAdb(deviceId, `shell mkdir -p "${remotePath}"`);
+  const escapedPath = remotePath.replace(/"/g, '\\"');
+  const res = await runAdb(deviceId, `shell mkdir -p "${escapedPath}"`);
   if (res.success) {
     return { success: true, message: "Folder created successfully." };
   } else {

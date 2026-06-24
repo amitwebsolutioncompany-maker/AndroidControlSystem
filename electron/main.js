@@ -194,17 +194,31 @@ ipcMain.handle("file-manager-download", async (event, { deviceId, remotePath }) 
 // Push (upload) file from PC to TV
 ipcMain.handle("file-manager-upload", async (event, { deviceId, remoteFolder }) => {
     const res = await dialog.showOpenDialog(mainWindow, {
-        title: "Select File to Upload to TV",
-        properties: ["openFile"]
+        title: "Select Files to Upload to TV",
+        properties: ["openFile", "multiSelections"]
     });
     if (res.canceled || res.filePaths.length === 0) {
         return { success: false, error: "Upload cancelled." };
     }
-    const localPath = res.filePaths[0];
-    const filename = path.basename(localPath);
-    // Posix paths are used on Android file systems (slash separation)
-    const remoteDest = path.posix.join(remoteFolder, filename);
-    return await adb.pushFile(deviceId, localPath, remoteDest);
+    
+    // Upload all selected files
+    const results = [];
+    for (const localPath of res.filePaths) {
+        const filename = path.basename(localPath);
+        // Posix paths are used on Android file systems (slash separation)
+        const remoteDest = path.posix.join(remoteFolder, filename);
+        const result = await adb.pushFile(deviceId, localPath, remoteDest);
+        results.push({ file: filename, ...result });
+    }
+    
+    // Return overall success if at least one file uploaded successfully
+    const successCount = results.filter(r => r.success).length;
+    return { 
+        success: successCount > 0, 
+        uploaded: successCount, 
+        total: results.length,
+        results 
+    };
 });
 
 // --- Apps Manager Handlers ---

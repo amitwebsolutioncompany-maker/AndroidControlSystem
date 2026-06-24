@@ -427,20 +427,26 @@ function refreshDeviceDropdowns() {
     appsDeviceSelect.innerHTML = optionsHTML;
 
     // Restore selected values if still online
-    if (onlineDevices.some(d => d.id === oldFileVal)) {
+    if (oldFileVal && onlineDevices.some(d => d.id === oldFileVal)) {
         fileManagerDeviceSelect.value = oldFileVal;
-    } else if (oldFileVal) {
+        activeFileManagerDevice = oldFileVal;
+    } else {
         fileManagerDeviceSelect.value = "";
         activeFileManagerDevice = "";
-        renderFilesEmpty("Active TV device disconnected.");
+        if (oldFileVal) {
+            renderFilesEmpty("Active TV device disconnected.");
+        }
     }
 
-    if (onlineDevices.some(d => d.id === oldAppsVal)) {
+    if (oldAppsVal && onlineDevices.some(d => d.id === oldAppsVal)) {
         appsDeviceSelect.value = oldAppsVal;
-    } else if (oldAppsVal) {
+        activeAppsDevice = oldAppsVal;
+    } else {
         appsDeviceSelect.value = "";
         activeAppsDevice = "";
-        renderAppsEmpty("Active TV device disconnected.");
+        if (oldAppsVal) {
+            renderAppsEmpty("Active TV device disconnected.");
+        }
     }
 }
 
@@ -1294,19 +1300,19 @@ async function loadFilesList() {
                 const sizeLabel = item.isDir ? "--" : formatBytes(item.size);
 
                 const trClass = item.isDir ? "style='cursor: pointer; font-weight: 500;'" : "";
-                const dbClickAttr = item.isDir ? `ondblclick="navigateFolder('${item.name}')"` : "";
+                const dbClickAttr = item.isDir ? `navigateFolder('${item.name}')` : "";
 
                 return `
-                    <tr ${trClass} ${dbClickAttr}>
-                        <td>
+                    <tr ${trClass}>
+                        <td class="file-name-cell" ${item.isDir ? `ondblclick="${dbClickAttr}"` : ""}>
                             <i class="fa-solid ${icon}" style="color: ${iconColor}; margin-right: 8px;"></i>
-                            ${item.name}
+                            <span class="file-name-text">${item.name}</span>
                         </td>
                         <td>${item.isDir ? 'Folder' : 'File'}</td>
                         <td>${sizeLabel}</td>
                         <td class="progress-time">${item.date}</td>
-                        <td style="text-align: right;">
-                            <button class="btn btn-secondary discovery-small-btn" onclick="renameFileManagerItem('${item.name}')" title="Rename"><i class="fa-solid fa-pen"></i></button>
+                        <td class="file-actions-cell" style="text-align: right;">
+                            <button class="btn btn-secondary discovery-small-btn" onclick="window.startRenameFileManagerItem('${item.name}', ${item.isDir}, this)" title="Rename"><i class="fa-solid fa-pen"></i></button>
                             ${!item.isDir ? `<button class="btn btn-secondary discovery-small-btn" onclick="downloadFileManagerFile('${item.name}')" title="Download"><i class="fa-solid fa-download"></i></button>` : ''}
                             <button class="btn btn-danger discovery-small-btn" onclick="deleteFileManagerItem('${item.name}', ${item.isDir})" title="Delete"><i class="fa-solid fa-trash"></i></button>
                         </td>
@@ -1361,16 +1367,40 @@ fileManagerRefreshBtn.addEventListener("click", loadFilesList);
 // Create Folder mkdir
 fileManagerMkdirBtn.addEventListener("click", async () => {
     if (!activeFileManagerDevice) return;
-    const folderName = prompt("Enter new folder name:");
-    if (!folderName || !folderName.trim()) return;
+    
+    // Auto generate a unique default folder name
+    let baseName = "New_Folder";
+    let folderName = baseName;
+    let counter = 1;
+    
+    const existingNames = Array.from(fileManagerBody.querySelectorAll(".file-name-text"))
+        .map(el => el.textContent.trim());
+        
+    while (existingNames.includes(folderName)) {
+        folderName = `${baseName}_${counter}`;
+        counter++;
+    }
 
     showStatus("Creating directory...", "info");
-    const targetFolder = currentPath === "/" ? `/${folderName.trim()}` : `${currentPath}/${folderName.trim()}`;
+    const targetFolder = currentPath === "/" ? `/${folderName}` : `${currentPath}/${folderName}`;
 
     try {
         const res = await window.api.fileManagerMkdir(activeFileManagerDevice, targetFolder);
         if (res.success) {
-            loadFilesList();
+            await loadFilesList();
+            
+            // Auto open the rename edit mode for the newly created folder
+            setTimeout(() => {
+                const rows = Array.from(fileManagerBody.querySelectorAll("tr"));
+                const newRow = rows.find(r => {
+                    const txtEl = r.querySelector(".file-name-text");
+                    return txtEl && txtEl.textContent.trim() === folderName;
+                });
+                if (newRow) {
+                    const renameBtn = newRow.querySelector(".file-actions-cell button");
+                    if (renameBtn) renameBtn.click();
+                }
+            }, 150);
         } else {
             alert(`Mkdir failed: ${res.error}`);
         }
@@ -1387,6 +1417,10 @@ fileManagerUploadBtn.addEventListener("click", async () => {
     try {
         const result = await window.api.fileManagerUpload(activeFileManagerDevice, currentPath);
         if (result.success) {
+            const msg = result.total > 1 
+                ? `Successfully uploaded ${result.uploaded} of ${result.total} files!`
+                : `File uploaded successfully!`;
+            alert(msg);
             loadFilesList();
         } else if (!result.error.includes("cancelled")) {
             alert(`Upload failed: ${result.error}`);
@@ -1436,14 +1470,52 @@ window.deleteFileManagerItem = async function (itemName, isDir) {
     }
 };
 
-// Rename File/Folder (Global handler)
-window.renameFileManagerItem = async function (itemName) {
+// Rename File/Folder (Global handler - Inline Edit start)
+window.startRenameFileManagerItem = function (itemName, isDir, btn) {
+    const row = btn.closest("tr");
+    const nameCell = row.querySelector(".file-name-cell");
+    const actionsCell = row.querySelector(".file-actions-cell");
+    
+    const icon = isDir ? "fa-folder" : "fa-file";
+    const iconColor = isDir ? "#f59e0b" : "#94a3b8";
+
+    // Disable double click handler temporarily during edit
+    nameCell.removeAttribute("ondblclick");
+
+    nameCell.innerHTML = `
+        <i class="fa-solid ${icon}" style="color: ${iconColor}; margin-right: 8px;"></i>
+        <input type="text" class="rename-input" value="${itemName}" style="padding: 4px 8px; font-size: 13px; border-radius: 4px; border: 1px solid var(--primary); background: #ffffff; color: #000000; width: 70%; outline: none; font-weight: 500;">
+    `;
+    
+    const input = nameCell.querySelector(".rename-input");
+    input.focus();
+    input.select();
+    
+    // Handle Enter to Save, Escape to Cancel
+    input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            window.saveRenameFileManagerItem(itemName, input.value, isDir);
+        } else if (e.key === "Escape") {
+            loadFilesList();
+        }
+    });
+
+    // Replace actions cell with Save and Cancel buttons
+    actionsCell.innerHTML = `
+        <button class="btn btn-success discovery-small-btn" onclick="window.saveRenameFileManagerItem('${itemName}', this.closest('tr').querySelector('.rename-input').value, ${isDir})" title="Save"><i class="fa-solid fa-check"></i> Save</button>
+        <button class="btn btn-secondary discovery-small-btn" onclick="loadFilesList()" title="Cancel"><i class="fa-solid fa-xmark"></i> Cancel</button>
+    `;
+};
+
+// Rename File/Folder (Global handler - Inline Edit save)
+window.saveRenameFileManagerItem = async function (oldName, newName, isDir) {
     if (!activeFileManagerDevice) return;
-    const oldPath = currentPath === "/" ? `/${itemName}` : `${currentPath}/${itemName}`;
+    if (!newName || !newName.trim() || newName.trim() === oldName) {
+        loadFilesList();
+        return;
+    }
 
-    const newName = prompt(`Rename "${itemName}" to:`, itemName);
-    if (!newName || !newName.trim() || newName.trim() === itemName) return;
-
+    const oldPath = currentPath === "/" ? `/${oldName}` : `${currentPath}/${oldName}`;
     const newPath = currentPath === "/" ? `/${newName.trim()}` : `${currentPath}/${newName.trim()}`;
 
     try {
@@ -1452,9 +1524,11 @@ window.renameFileManagerItem = async function (itemName) {
             loadFilesList();
         } else {
             alert(`Rename failed: ${res.error}`);
+            loadFilesList();
         }
     } catch (err) {
         alert(`Rename error: ${err.message}`);
+        loadFilesList();
     }
 };
 
