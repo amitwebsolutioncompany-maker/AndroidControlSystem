@@ -116,6 +116,8 @@ TvAdsPlayer/ios/build/
 TvAdsPlayer/ios/Pods/
 TvAdsPlayer/ios/.xcode.env.local
 TvAdsPlayer/.bundle/
+TvAdsPlayer/android/app/debug.keystore
+
 
 # C Projects / Intermediate compilation folder
 c/
