@@ -903,6 +903,9 @@ async function openServiceMenu(deviceId, menuType) {
   if (menuType === "gtv") {
     // INPUT (178) -> LEFT (21) -> LEFT (21) -> UP (19) -> DOWN (20)
     sequence = "input keyevent 178 && input keyevent 21 && input keyevent 21 && input keyevent 19 && input keyevent 20";
+  } else if (menuType === "custom") {
+    // HOME (3) -> INPUT (178) -> LEFT (21) -> RIGHT (22) -> LEFT (21) -> RIGHT (22) -> BACK (4)
+    sequence = "input keyevent 3 && input keyevent 178 && input keyevent 21 && input keyevent 22 && input keyevent 21 && input keyevent 22 && input keyevent 4";
   } else if (menuType === "smarta") {
     // MENU (82) -> 8 (8) -> 8 (8) -> 1 (11) -> 4 (14)
     sequence = "input keyevent 82 && input keyevent 8 && input keyevent 8 && input keyevent 11 && input keyevent 14";

@@ -135,6 +135,7 @@ export default function App() {
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
   const [focusedId, setFocusedId] = useState<string>('');
   const [showPermissionPopup, setShowPermissionPopup] = useState<boolean>(false);
+  const [showUsbPopup, setShowUsbPopup] = useState<boolean>(false);
   const scrollX = useRef(new Animated.Value(0)).current;
   const tickerWidth = useRef(0);
   const [customTextColor, setCustomTextColor] = useState<string>(config.tickerTextColor);
@@ -165,8 +166,7 @@ export default function App() {
           if (mounted) {
             setLicenseStatus('Unable to read device id.');
             setLicenseReady(true);
-            // Auto-allow app to open even without device ID for now
-            setLicensed(true);
+            setLicensed(false);
           }
           return;
         }
@@ -194,8 +194,6 @@ export default function App() {
         if (mounted) {
           setLicensed(false);
           setLicenseStatus('Unable to read device id.');
-          // Auto-allow app to open even on error for now
-          setLicensed(true);
         }
       } finally {
         if (mounted) setLicenseReady(true);
@@ -219,6 +217,22 @@ export default function App() {
         setLicenseInput(String(licenseInput || '').trim().toUpperCase());
         setLicensed(true);
         setReady(true); // Set ready to true directly to proceed to main screen
+        
+        // Check overlay permission after activation
+        if (Platform.OS === 'android') {
+          try {
+            const hasOverlay = await (NativeModules as any)?.PermissionModule?.checkOverlayPermission?.();
+            console.log('Overlay permission check:', hasOverlay);
+            if (!hasOverlay) {
+              console.log('Overlay permission not granted, showing popup');
+              setTimeout(() => {
+                requestOverlayPermission();
+              }, 500);
+            }
+          } catch (e) {
+            console.error('Error checking overlay permission:', e);
+          }
+        }
       }
     } catch (e: any) {
       console.error('License activation error:', e);
@@ -490,7 +504,13 @@ export default function App() {
       // Auto-enable pendrive when USB is mounted with playable media
       if (usbState.mounted && usbState.hasPlayableMedia && !config.usePendrive) {
         console.log('USB detected - auto-enabling pendrive mode');
+        setShowUsbPopup(true);
         setConfig(prev => ({ ...prev, usePendrive: true }));
+        
+        // Auto-hide popup after 5 seconds
+        setTimeout(() => {
+          setShowUsbPopup(false);
+        }, 5000);
       }
       
       // Auto-disable pendrive when USB is not mounted
@@ -675,6 +695,36 @@ export default function App() {
           </Pressable>
 
           <Text style={styles.licenseStatus}>{licenseStatus}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Render USB detection popup
+  if (showUsbPopup) {
+    return (
+      <View style={styles.darkContainer}>
+        <StatusBar hidden />
+        <View style={styles.wizardCard}>
+          <Text style={styles.wizardEmoji}>🔌</Text>
+          <Text style={styles.wizardTitle}>USB Pendrive Detected</Text>
+          <Text style={styles.wizardDesc}>
+            Pendrive with media files detected. Auto-enabled pendrive mode.
+          </Text>
+
+          <Pressable
+            focusable
+            hasTVPreferredFocus={true}
+            onPress={() => setShowUsbPopup(false)}
+            style={({ pressed, focused }: any) => [
+              styles.btn,
+              focused && styles.btnFocused,
+              pressed && styles.btnPressed,
+              { marginTop: 12, minWidth: 200 }
+            ]}
+          >
+            <Text style={styles.btnText}>OK</Text>
+          </Pressable>
         </View>
       </View>
     );

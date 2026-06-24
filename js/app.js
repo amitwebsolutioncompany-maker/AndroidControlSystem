@@ -48,6 +48,7 @@ const btnCheckWifi = document.getElementById("btnCheckWifi");
 const btnCheckConnectivity = document.getElementById("btnCheckConnectivity");
 const btnOpenDevOptions = document.getElementById("btnOpenDevOptions");
 const btnServiceMenuGTV = document.getElementById("btnServiceMenuGTV");
+const btnServiceMenuCustom = document.getElementById("btnServiceMenuCustom");
 const btnServiceMenuSmartA = document.getElementById("btnServiceMenuSmartA");
 const btnServiceMenuSmartB = document.getElementById("btnServiceMenuSmartB");
 
@@ -114,7 +115,7 @@ const bulkInteractiveElements = [
     btnScreenOn, btnScreenOff, dpadUp, dpadDown, dpadLeft, dpadRight, dpadOk,
     btnBack, btnHome, btnRecents, btnVolUp, btnMute, btnVolDown,
     btnNotifications, btnQuickSettings, btnCheckIp, btnCheckWifi,
-    btnCheckConnectivity, btnOpenDevOptions, btnServiceMenuGTV, btnServiceMenuSmartA, btnServiceMenuSmartB,
+    btnCheckConnectivity, btnOpenDevOptions, btnServiceMenuGTV, btnServiceMenuCustom, btnServiceMenuSmartA, btnServiceMenuSmartB,
     loginPasswordInput, loginSubmitBtn, toggleLoginPasswordBtn
 ];
 const fileManagerDeviceSelect = document.getElementById("fileManagerDeviceSelect");
@@ -1240,6 +1241,7 @@ async function openBulkServiceMenu(menuType, label) {
 }
 
 btnServiceMenuGTV.addEventListener("click", () => openBulkServiceMenu("gtv", "Google TV Service Menu"));
+btnServiceMenuCustom.addEventListener("click", () => openBulkServiceMenu("custom", "Custom TV Service Menu"));
 btnServiceMenuSmartA.addEventListener("click", () => openBulkServiceMenu("smarta", "Smart TV Menu A (8814)"));
 btnServiceMenuSmartB.addEventListener("click", () => openBulkServiceMenu("smartb", "Smart TV Menu B (208)"));
 

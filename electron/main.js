@@ -98,17 +98,27 @@ ipcMain.handle("bulk-push", async (event, { deviceIds, dest }) => {
     }
     const filePaths = res.filePaths;
 
+    // Create TvAd folder in destination path
+    const tvAdPath = dest.endsWith('/') ? `${dest}TvAd` : `${dest}/TvAd`;
+
     const results = await Promise.all(
         deviceIds.map(async (id) => {
             try {
-                const r = await adb.pushFilesToDevice(id, filePaths, dest);
+                // Create TvAd folder first
+                const createResult = await adb.createFolder(id, tvAdPath);
+                if (!createResult.success) {
+                    console.log(`Failed to create TvAd folder on ${id}: ${createResult.error}`);
+                }
+
+                // Push files to TvAd folder
+                const r = await adb.pushFilesToDevice(id, filePaths, tvAdPath);
                 return { deviceId: id, success: r.success, results: r.results, error: r.error };
             } catch (e) {
                 return { deviceId: id, success: false, error: String(e) };
             }
         })
     );
-    return { success: true, results, fileCount: filePaths.length };
+    return { success: true, results, fileCount: filePaths.length, destPath: tvAdPath };
 });
 
 // Bulk Device Cleanup & Optimizations (runs in parallel)
