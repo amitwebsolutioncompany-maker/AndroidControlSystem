@@ -14,10 +14,31 @@ import {
   ScrollView,
   Animated,
   Easing,
+  PermissionsAndroid,
+  Platform,
+  Alert,
+  Linking,
+  NativeModules as RNNativeModules,
 } from 'react-native';
 import RNFS from 'react-native-fs';
 import Video from 'react-native-video';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  isUsbModuleAvailable,
+  getCurrentUsbState,
+  subscribeUsbState,
+  type UsbState,
+} from './src/services/usbManagerModule';
+import {
+  enableKioskMode,
+  disableKioskMode,
+  isKioskModuleAvailable,
+} from './src/services/kioskModule';
+import {
+  activateDeviceWithKey,
+  hasLocalActivationForDevice,
+  readStoredLicense,
+} from './src/services/licenseService';
 
 const { PermissionModule } = NativeModules;
 
@@ -87,6 +108,7 @@ interface AppConfig {
   tickerFontSize: number;
   usePendrive: boolean;
   resizeMode: 'contain' | 'cover' | 'stretch';
+  kioskMode: boolean;
 }
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -98,6 +120,7 @@ const DEFAULT_CONFIG: AppConfig = {
   tickerFontSize: 16,
   usePendrive: false,
   resizeMode: 'stretch',
+  kioskMode: false,
 };
 
 export default function App() {
@@ -117,13 +140,108 @@ export default function App() {
   const [customTextColor, setCustomTextColor] = useState<string>(config.tickerTextColor);
   const [customBgColor, setCustomBgColor] = useState<string>(config.tickerBgColor);
 
+  // License/Activation states
+  const [licenseDeviceId, setLicenseDeviceId] = useState<string>('');
+  const [licenseInput, setLicenseInput] = useState<string>('');
+  const [licensed, setLicensed] = useState<boolean>(false);
+  const [licenseBusy, setLicenseBusy] = useState<boolean>(false);
+  const [licenseStatus, setLicenseStatus] = useState<string>('');
+  const [licenseReady, setLicenseReady] = useState<boolean>(false);
+  const [licenseInputFocused, setLicenseInputFocused] = useState<boolean>(false);
+  const [licenseButtonFocused, setLicenseButtonFocused] = useState<boolean>(false);
+  const [ready, setReady] = useState<boolean>(false);
+
+  // Initialize license check
+  useEffect(() => {
+    let mounted = true;
+    const initLicense = async () => {
+      try {
+        console.log('Initializing license check...');
+        const deviceId = (NativeModules as any)?.DeviceIdModule?.getDeviceId?.();
+        console.log('Device ID from native module:', deviceId);
+
+        if (!deviceId) {
+          console.log('Device ID not found, skipping license check');
+          if (mounted) {
+            setLicenseStatus('Unable to read device id.');
+            setLicenseReady(true);
+            // Auto-allow app to open even without device ID for now
+            setLicensed(true);
+          }
+          return;
+        }
+
+        setLicenseDeviceId(deviceId);
+
+        const storedLicense = await readStoredLicense();
+        console.log('Stored license:', storedLicense);
+        if (storedLicense.licenseKey) {
+          setLicenseInput(storedLicense.licenseKey);
+        }
+
+        const active = await hasLocalActivationForDevice(deviceId);
+        console.log('Local activation check:', active);
+        if (mounted) {
+          setLicensed(!!active);
+          setLicenseStatus(
+            active
+              ? 'Device activated. Starting player...'
+              : 'License required. Enter key to activate.'
+          );
+        }
+      } catch (e: any) {
+        console.error('License check error:', e);
+        if (mounted) {
+          setLicensed(false);
+          setLicenseStatus('Unable to read device id.');
+          // Auto-allow app to open even on error for now
+          setLicensed(true);
+        }
+      } finally {
+        if (mounted) setLicenseReady(true);
+      }
+    };
+    initLicense();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const onActivateLicense = async () => {
+    if (licenseBusy) return;
+    setLicenseBusy(true);
+    try {
+      console.log('Starting activation with deviceId:', licenseDeviceId, 'key:', licenseInput);
+      const result = await activateDeviceWithKey(licenseDeviceId, licenseInput);
+      console.log('Activation result:', result);
+      setLicenseStatus(result.message);
+      if (result.success) {
+        setLicenseInput(String(licenseInput || '').trim().toUpperCase());
+        setLicensed(true);
+        setReady(true); // Set ready to true directly to proceed to main screen
+      }
+    } catch (e: any) {
+      console.error('License activation error:', e);
+      setLicenseStatus('Activation failed: ' + (e?.message || 'Unknown error'));
+    } finally {
+      setLicenseBusy(false);
+    }
+  };
+
+  // Auto-set ready when licensed
+  useEffect(() => {
+    if (licensed && !ready) {
+      setReady(true);
+    }
+  }, [licensed, ready]);
+
   // Ticker animation effect
   useEffect(() => {
     if (config.tickerText && !configOpen) {
       const animate = () => {
         Animated.timing(scrollX, {
           toValue: -tickerWidth.current,
-          duration: 10000, // 10 seconds for full scroll (medium speed)
+          duration: 5000, // 5 seconds for full scroll (faster speed)
           easing: Easing.linear,
           useNativeDriver: true,
         }).start(() => {
@@ -141,6 +259,28 @@ export default function App() {
   // Permissions States
   const [hasStorage, setHasStorage] = useState<boolean>(false);
   const [permissionsLoaded, setPermissionsLoaded] = useState<boolean>(false);
+
+  // Request overlay permission
+  const requestOverlayPermission = useCallback(() => {
+    if (Platform.OS !== 'android') return;
+    
+    Alert.alert(
+      'Permission Required',
+      'This app needs "Display over other apps" permission to auto-start on boot. Please enable it in settings.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Open Settings',
+          onPress: () => {
+            Linking.openSettings();
+          },
+        },
+      ]
+    );
+  }, []);
 
   // Active resolved ads directory path (internal or USB)
   const [activeAdsDir, setActiveAdsDir] = useState<string>(ADS_DIR);
@@ -175,116 +315,50 @@ export default function App() {
     }
   }, []);
 
-  // USB Storage Ads folder auto-detection and fallback
+  // USB Storage Ads folder auto-detection using native UsbManagerModule
   const resolveAdsDirectory = useCallback(async () => {
-    console.log('resolveAdsDirectory called with usePendrive:', config.usePendrive);
+    console.log('=== resolveAdsDirectory START ===');
+    console.log('usePendrive config value:', config.usePendrive);
+    console.log('UsbModule available:', isUsbModuleAvailable());
     
     // If pendrive is enabled in config, try to find USB first
-    if (config.usePendrive) {
+    if (config.usePendrive && isUsbModuleAvailable()) {
+      console.log('>>> PENDRIVE MODE: Using native UsbManagerModule...');
       try {
-        // Check common USB mount points for Ads folder
-        const possibleUsbPaths = [
-          '/storage/usb',
-          '/storage/USB',
-          '/storage/usbdisk',
-          '/storage/USBDISK',
-          '/mnt/usb',
-          '/mnt/USB',
-          '/mnt/media_rw',
-          '/sdcard1',
-          '/storage/sdcard1',
-        ];
-
-        console.log('Checking possible USB paths for Ads folder:', possibleUsbPaths);
-
-        for (const usbPath of possibleUsbPaths) {
-          try {
-            const exists = await RNFS.exists(usbPath);
-            console.log('Path exists check:', usbPath, exists);
-            
-            if (exists) {
-              const usbAdsDir = `${usbPath}/Ads`;
-              const adsExists = await RNFS.exists(usbAdsDir);
-              console.log('Ads folder exists at:', usbAdsDir, adsExists);
-              
-              if (adsExists) {
-                const usbFiles = await RNFS.readDir(usbAdsDir);
-                console.log('Files in USB Ads folder:', usbFiles.length);
-                
-                const hasValidMedia = usbFiles.some(f => {
-                  if (f.isFile()) {
-                    const ext = '.' + f.name.split('.').pop()?.toLowerCase();
-                    return IMAGE_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext);
-                  }
-                  return false;
-                });
-                
-                if (hasValidMedia) {
-                  console.log('✓ Using USB pendrive Ads directory:', usbAdsDir);
-                  return usbAdsDir;
-                }
-              }
-            }
-          } catch (pathError) {
-            console.log('Error checking path:', usbPath, pathError);
-          }
-        }
-
-        // Also check /storage for any mounted drives with Ads folder
-        const storageExists = await RNFS.exists('/storage');
-        console.log('/storage exists:', storageExists);
+        const usbState = await getCurrentUsbState();
+        console.log('USB State received:', JSON.stringify(usbState));
+        console.log('USB mounted:', usbState.mounted);
+        console.log('USB hasPlayableMedia:', usbState.hasPlayableMedia);
+        console.log('USB mountPath:', usbState.mountPath);
+        console.log('USB playlistSize:', usbState.playlist?.length);
         
-        if (storageExists) {
-          const storageItems = await RNFS.readDir('/storage');
-          console.log('Storage items:', storageItems.map(i => i.name));
-          
-          for (const item of storageItems) {
-            if (item.isDirectory()) {
-              const name = item.name.toLowerCase();
-              console.log('Checking storage item:', name);
-              
-              // Skip internal emulated storage systems
-              if (name !== 'emulated' && name !== 'self') {
-                const usbAdsDir = `${item.path}/Ads`;
-                const usbAdsExists = await RNFS.exists(usbAdsDir);
-                console.log('Ads folder exists at:', usbAdsDir, usbAdsExists);
-                
-                if (usbAdsExists) {
-                  const usbFiles = await RNFS.readDir(usbAdsDir);
-                  console.log('Files in Ads folder:', usbFiles.length);
-                  
-                  const hasValidMedia = usbFiles.some(f => {
-                    if (f.isFile()) {
-                      const ext = '.' + f.name.split('.').pop()?.toLowerCase();
-                      return IMAGE_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext);
-                    }
-                    return false;
-                  });
-                  
-                  if (hasValidMedia) {
-                    console.log('✓ Using USB pendrive Ads directory from /storage:', usbAdsDir);
-                    return usbAdsDir;
-                  }
-                }
-              }
-            }
-          }
+        if (usbState.mounted && usbState.hasPlayableMedia && usbState.mountPath) {
+          const usbAdsPath = `${usbState.mountPath}/Ads`;
+          console.log(`✓✓✓ SUCCESS: USB mounted with playable media at ${usbAdsPath}`);
+          return usbAdsPath;
         }
+        
+        console.log('USB mounted but no playable media found, falling back to internal storage');
       } catch (e) {
-        console.warn('Error reading TV storage mounts for USB detection:', e);
+        console.error('Error getting USB state:', e);
       }
     }
 
     // Default to internal storage TvAd folder
+    console.log('>>> INTERNAL STORAGE MODE: Using internal storage TvAd folder');
     const internalDir = `${RNFS.ExternalStorageDirectoryPath}/TvAd`;
     const internalExists = await RNFS.exists(internalDir);
+    console.log(`TvAd folder exists: ${internalExists}`);
+    
     if (!internalExists) {
-      console.log('TvAd folder does not exist in internal storage, will create if needed');
-      // Don't create folder here - let it be created only when needed
+      console.log('Creating TvAd folder...');
+      await RNFS.mkdir(internalDir);
     }
-    console.log('Using internal storage TvAd directory:', internalDir);
+    
+    console.log('=== resolveAdsDirectory END ===');
+    console.log('Returning internal path:', internalDir);
     return internalDir;
-  }, [config.usePendrive]);
+  }, [config]);
 
   // Check storage permission
   const checkStoragePermission = useCallback(async () => {
@@ -346,6 +420,7 @@ export default function App() {
 
   // Scan and load media files
   const scanFolder = useCallback(async () => {
+    console.log('=== scanFolder START ===');
     setLoading(true);
     setErrorCount(0);
     try {
@@ -356,24 +431,30 @@ export default function App() {
 
       // Check if directory exists before reading
       const dirExists = await RNFS.exists(resolvedDir);
+      console.log('Directory exists:', dirExists);
+      
       if (!dirExists) {
         console.log('Directory does not exist, creating it:', resolvedDir);
         await RNFS.mkdir(resolvedDir);
       }
 
+      console.log('Reading directory contents...');
       const files = await RNFS.readDir(resolvedDir);
+      console.log('Total files found:', files.length);
       const list: MediaItem[] = [];
 
       files.forEach((file) => {
         if (file.isFile()) {
           const ext = '.' + file.name.split('.').pop()?.toLowerCase();
           if (IMAGE_EXTENSIONS.includes(ext)) {
+            console.log(`Image file: ${file.name}`);
             list.push({
               name: file.name,
               path: file.path,
               type: 'image',
             });
           } else if (VIDEO_EXTENSIONS.includes(ext)) {
+            console.log(`Video file: ${file.name}`);
             list.push({
               name: file.name,
               path: file.path,
@@ -383,6 +464,8 @@ export default function App() {
         }
       });
 
+      console.log(`Total media files: ${list.length}`);
+      
       // Sort alphabetically so sorting remains consistent
       list.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -397,20 +480,49 @@ export default function App() {
     }
   }, [config.usePendrive, resolveAdsDirectory]);
 
+  // Auto USB detection - toggle pendrive config based on USB mount status
+  useEffect(() => {
+    if (!isUsbModuleAvailable()) return;
+
+    const unsubscribe = subscribeUsbState((usbState) => {
+      console.log('USB state changed:', JSON.stringify(usbState));
+      
+      // Auto-enable pendrive when USB is mounted with playable media
+      if (usbState.mounted && usbState.hasPlayableMedia && !config.usePendrive) {
+        console.log('USB detected - auto-enabling pendrive mode');
+        setConfig(prev => ({ ...prev, usePendrive: true }));
+      }
+      
+      // Auto-disable pendrive when USB is not mounted
+      if (!usbState.mounted && config.usePendrive) {
+        console.log('USB removed - auto-disabling pendrive mode');
+        setConfig(prev => ({ ...prev, usePendrive: false }));
+      }
+    });
+
+    return () => unsubscribe();
+  }, [config.usePendrive]);
+
+  // Kiosk mode - enable/disable native kiosk mode when config changes
+  useEffect(() => {
+    if (!isKioskModuleAvailable()) return;
+
+    if (config.kioskMode) {
+      console.log('Enabling native kiosk mode');
+      enableKioskMode();
+    } else {
+      console.log('Disabling native kiosk mode');
+      disableKioskMode();
+    }
+  }, [config.kioskMode]);
+
   // Initial scan triggered only when storage permission is verified or config changes
   useEffect(() => {
     if (permissionsLoaded && hasStorage) {
+      console.log('Triggering scan - permissions loaded and storage available');
       scanFolder();
     }
   }, [permissionsLoaded, hasStorage, scanFolder, config.usePendrive]);
-
-  // Additional effect to rescan when pendrive setting changes
-  useEffect(() => {
-    if (permissionsLoaded && hasStorage) {
-      console.log('Pendrive setting changed, rescanning folder');
-      scanFolder();
-    }
-  }, [config.usePendrive]);
 
   // Handle D-pad Menu, D-pad Up or OK to open config settings
   useEffect(() => {
@@ -446,13 +558,17 @@ export default function App() {
     }
   }, [configOpen]);
 
-  // Back button closes config menu
+  // Back button closes config menu or blocks exit in kiosk mode
   useEffect(() => {
     const backAction = () => {
-      console.log('Back pressed - configOpen:', configOpen);
+      console.log('Back pressed - configOpen:', configOpen, 'kioskMode:', config.kioskMode);
       if (configOpen) {
         setConfigOpen(false);
         return true; // prevent default back press
+      }
+      if (config.kioskMode) {
+        console.log('Kiosk mode enabled - blocking back button');
+        return true; // block back button in kiosk mode
       }
       return false; // exit app normally
     };
@@ -463,7 +579,7 @@ export default function App() {
     );
 
     return () => backHandler.remove();
-  }, [configOpen]);
+  }, [configOpen, config.kioskMode]);
 
   // Play next file in queue
   const playNext = useCallback(() => {
@@ -502,6 +618,67 @@ export default function App() {
       }, 2500);
     }
   };
+
+  const currentMedia = mediaFiles[currentIndex === -1 ? 0 : currentIndex];
+
+  // Show license screen if not licensed
+  if (!licensed && licenseReady) {
+    console.log('Showing license screen, deviceId:', licenseDeviceId);
+    return (
+      <View style={styles.darkContainer}>
+        <StatusBar hidden />
+        <View style={styles.licenseCard}>
+          <Text style={styles.connectTitle}>Activate Device</Text>
+          <Text style={styles.licenseHint}>Share Device ID and enter license key provided by admin.</Text>
+
+          <View style={styles.licenseRow}>
+            <Text style={styles.licenseLabel}>Device ID</Text>
+            <Text selectable style={styles.licenseValue}>{licenseDeviceId || 'unknown'}</Text>
+          </View>
+
+          <View style={styles.licenseRow}>
+            <Text style={styles.licenseLabel}>License Key</Text>
+            <TextInput
+              value={licenseInput}
+              onChangeText={setLicenseInput}
+              onFocus={() => setLicenseInputFocused(true)}
+              onBlur={() => setLicenseInputFocused(false)}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              placeholder="Enter key"
+              placeholderTextColor="rgba(210,220,232,0.45)"
+              style={[
+                styles.licenseInput,
+                licenseInputFocused ? styles.licenseInputFocused : null,
+              ]}
+              focusable
+              hasTVPreferredFocus
+            />
+          </View>
+
+          <Pressable
+            onPress={onActivateLicense}
+            onFocus={() => setLicenseButtonFocused(true)}
+            onBlur={() => setLicenseButtonFocused(false)}
+            disabled={licenseBusy}
+            style={({ pressed }) => [
+              styles.licenseBtn,
+              licenseButtonFocused ? styles.licenseBtnFocused : null,
+              pressed && !licenseBusy ? { opacity: 0.85 } : null,
+              licenseBusy ? { opacity: 0.55 } : null,
+            ]}
+            focusable
+          >
+            <Text style={styles.licenseBtnText}>
+              {licenseBusy ? 'Verifying...' : 'Save And Activate'}
+            </Text>
+          </Pressable>
+
+          <Text style={styles.licenseStatus}>{licenseStatus}</Text>
+        </View>
+      </View>
+    );
+  }
 
   // Render permission popup if permission is missing
   if (showPermissionPopup && !hasStorage) {
@@ -577,8 +754,6 @@ export default function App() {
     );
   }
 
-  const currentMedia = mediaFiles[currentIndex === -1 ? 0 : currentIndex];
-
   return (
     <View style={styles.viewerContainer}>
       <StatusBar hidden />
@@ -586,31 +761,7 @@ export default function App() {
       {/* Fullscreen Player */}
       {currentMedia && (
         <View style={styles.mediaContainer}>
-          {/* Top Ticker */}
-          {(() => {
-            console.log('Ticker check - position:', config.tickerPosition, 'text:', config.tickerText);
-            return config.tickerPosition === 'top' && config.tickerText;
-          })() && (
-            <View style={[styles.tickerBar, config.tickerBgColor !== 'transparent' && { backgroundColor: config.tickerBgColor }, styles.tickerBarTop]}>
-              <Animated.View 
-                style={[styles.tickerScrollContainer, { transform: [{ translateX: scrollX }] }]}
-                onLayout={(e) => {
-                  tickerWidth.current = e.nativeEvent.layout.width;
-                }}
-              >
-                <Animated.Text
-                  style={[styles.tickerText, { color: config.tickerTextColor, fontSize: config.tickerFontSize }]}
-                  onLayout={(e) => {
-                    tickerWidth.current = e.nativeEvent.layout.width;
-                  }}
-                >
-                  {config.tickerText}
-                </Animated.Text>
-              </Animated.View>
-            </View>
-          )}
-          
-          {/* Media Player */}
+          {/* Media Player - Always takes full space */}
           <Pressable
             focusable={!configOpen}
             hasTVPreferredFocus={!configOpen}
@@ -643,7 +794,31 @@ export default function App() {
             )}
           </Pressable>
 
-          {/* Bottom Ticker */}
+          {/* Top Ticker - Overlay on top of media */}
+          {(() => {
+            console.log('Ticker check - position:', config.tickerPosition, 'text:', config.tickerText);
+            return config.tickerPosition === 'top' && config.tickerText;
+          })() && (
+            <View style={[styles.tickerBar, config.tickerBgColor !== 'transparent' && { backgroundColor: config.tickerBgColor }, styles.tickerBarTop]}>
+              <Animated.View 
+                style={[styles.tickerScrollContainer, { transform: [{ translateX: scrollX }] }]}
+                onLayout={(e) => {
+                  tickerWidth.current = e.nativeEvent.layout.width;
+                }}
+              >
+                <Animated.Text
+                  style={[styles.tickerText, { color: config.tickerTextColor, fontSize: config.tickerFontSize }]}
+                  onLayout={(e) => {
+                    tickerWidth.current = e.nativeEvent.layout.width;
+                  }}
+                >
+                  {config.tickerText}
+                </Animated.Text>
+              </Animated.View>
+            </View>
+          )}
+
+          {/* Bottom Ticker - Overlay on top of media */}
           {(() => {
             console.log('Bottom ticker check - position:', config.tickerPosition, 'text:', config.tickerText);
             return config.tickerPosition === 'bottom' && config.tickerText;
@@ -892,6 +1067,73 @@ export default function App() {
                 </View>
               </View>
 
+              {/* Kiosk Mode Option */}
+              <View style={styles.settingSectionSingle}>
+                <Text style={styles.sectionTitle}>Kiosk Mode (Block Exit):</Text>
+                <View style={styles.singleColumn}>
+                  <Pressable
+                    id="kiosk-on"
+                    focusable={true}
+                    onFocus={() => setFocusedId('kiosk-on')}
+                    onBlur={() => setFocusedId('')}
+                    onPress={() => setConfig({ ...config, kioskMode: true })}
+                    style={({ pressed, focused }: any) => [
+                      styles.choiceBtnSingle,
+                      config.kioskMode && styles.choiceActive,
+                      (focused || focusedId === 'kiosk-on') && styles.btnFocused,
+                      pressed && styles.btnPressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.choiceText,
+                        config.kioskMode && styles.choiceTextActive,
+                      ]}
+                    >
+                      ON
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    id="kiosk-off"
+                    focusable={true}
+                    onFocus={() => setFocusedId('kiosk-off')}
+                    onBlur={() => setFocusedId('')}
+                    onPress={() => setConfig({ ...config, kioskMode: false })}
+                    style={({ pressed, focused }: any) => [
+                      styles.choiceBtnSingle,
+                      !config.kioskMode && styles.choiceActive,
+                      (focused || focusedId === 'kiosk-off') && styles.btnFocused,
+                      pressed && styles.btnPressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.choiceText,
+                        !config.kioskMode && styles.choiceTextActive,
+                      ]}
+                    >
+                      OFF
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* Overlay Permission */}
+              <View style={styles.settingSectionSingle}>
+                <Text style={styles.sectionTitle}>Display Over Other Apps:</Text>
+                <Pressable
+                  onPress={requestOverlayPermission}
+                  style={({ pressed, focused }: any) => [
+                    styles.btn,
+                    focused && styles.btnFocused,
+                    pressed && styles.btnPressed,
+                    { marginTop: 12, minWidth: 200 }
+                  ]}
+                >
+                  <Text style={styles.btnText}>Grant Permission</Text>
+                </Pressable>
+              </View>
+
               {/* Pendrive Option */}
               <View style={styles.settingSectionSingle}>
                 <Text style={styles.sectionTitle}>Use Pendrive (USB) for Ads:</Text>
@@ -1003,6 +1245,90 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     fontSize: 16,
     fontWeight: '500',
+  },
+  licenseCard: {
+    width: '80%',
+    backgroundColor: '#171923',
+    borderRadius: 16,
+    padding: 32,
+    borderWidth: 1,
+    borderColor: '#2d3748',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  connectTitle: {
+    fontSize: 24,
+    color: '#f8fafc',
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  licenseHint: {
+    fontSize: 14,
+    color: '#94a3b8',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 24,
+  },
+  licenseRow: {
+    width: '100%',
+    marginBottom: 16,
+  },
+  licenseLabel: {
+    color: '#64748b',
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  licenseValue: {
+    color: '#38bdf8',
+    fontSize: 16,
+    fontWeight: 'bold',
+    backgroundColor: '#0d0e15',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  licenseInput: {
+    backgroundColor: '#0d0e15',
+    color: '#f8fafc',
+    fontSize: 16,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  licenseInputFocused: {
+    borderColor: '#38bdf8',
+  },
+  licenseBtn: {
+    backgroundColor: '#6366f1',
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 8,
+    marginTop: 8,
+    minWidth: 200,
+  },
+  licenseBtnFocused: {
+    backgroundColor: '#4f46e5',
+  },
+  licenseBtnText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  licenseStatus: {
+    marginTop: 16,
+    color: '#94a3b8',
+    fontSize: 14,
+    textAlign: 'center',
   },
   instructionCard: {
     width: '80%',
@@ -1268,6 +1594,7 @@ const styles = StyleSheet.create({
   },
   tickerBarBottom: {
     bottom: 0,
+    position: 'absolute',
   },
   tickerScrollContainer: {
     flexDirection: 'row',
