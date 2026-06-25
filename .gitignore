@@ -118,6 +118,17 @@ TvAdsPlayer/ios/.xcode.env.local
 TvAdsPlayer/.bundle/
 TvAdsPlayer/android/app/debug.keystore
 
+NvAdPlayer/node_modules/
+NvAdPlayer/android/.gradle/
+NvAdPlayer/android/build/
+NvAdPlayer/android/app/build/
+NvAdPlayer/android/app/.cxx/
+NvAdPlayer/android/local.properties
+NvAdPlayer/ios/build/
+NvAdPlayer/ios/Pods/
+NvAdPlayer/ios/.xcode.env.local
+NvAdPlayer/.bundle/
+NvAdPlayer/android/app/debug.keystore
 
 # C Projects / Intermediate compilation folder
 c/
