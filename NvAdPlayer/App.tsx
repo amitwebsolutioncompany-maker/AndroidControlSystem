@@ -175,12 +175,17 @@ export default function App() {
 
         const storedLicense = await readStoredLicense();
         console.log('Stored license:', storedLicense);
+        console.log('License key length:', storedLicense.licenseKey?.length);
+        console.log('License key valid:', !!storedLicense.licenseKey && storedLicense.licenseKey.length >= 8);
+        
         if (storedLicense.licenseKey) {
           setLicenseInput(storedLicense.licenseKey);
         }
 
         const active = await hasLocalActivationForDevice(deviceId);
-        console.log('Local activation check:', active);
+        console.log('Local activation check result:', active);
+        console.log('Licensed state will be set to:', !!active);
+        
         if (mounted) {
           setLicensed(!!active);
           if (active) {

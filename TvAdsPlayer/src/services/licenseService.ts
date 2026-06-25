@@ -82,9 +82,9 @@ export async function saveLicense(deviceId: string, licenseKey: string) {
 
 export async function hasLocalActivationForDevice(deviceId: string) {
   const stored = await readStoredLicense();
-  // Only check if we have a valid license key stored (8+ characters)
+  // Only check if we have a valid license key stored (4+ characters)
   // Ignore deviceId match since license is tied to device on server side
-  return !!stored.licenseKey && stored.licenseKey.length >= 8;
+  return !!stored.licenseKey && stored.licenseKey.length >= 4;
 }
 
 export async function activateDeviceWithKey(deviceId: string, enteredKey: string) {
