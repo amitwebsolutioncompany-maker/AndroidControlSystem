@@ -130,6 +130,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [configOpen, setConfigOpen] = useState<boolean>(false);
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
+  const [tempConfig, setTempConfig] = useState<AppConfig>(DEFAULT_CONFIG);
   const [resizeMode, setResizeMode] = useState<'contain' | 'cover' | 'stretch'>('stretch');
   const [errorCount, setErrorCount] = useState<number>(0);
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
@@ -298,6 +299,7 @@ export default function App() {
       if (savedConfig) {
         const parsed = JSON.parse(savedConfig);
         setConfig(parsed);
+        setTempConfig(parsed);
         setResizeMode(parsed.resizeMode || 'stretch');
         setCustomTextColor(parsed.tickerTextColor || '#FFFFFF');
         setCustomBgColor(parsed.tickerBgColor || '#000000');
@@ -312,6 +314,7 @@ export default function App() {
     try {
       await AsyncStorage.setItem('tvads_config', JSON.stringify(newConfig));
       setConfig(newConfig);
+      setTempConfig(newConfig);
       setResizeMode(newConfig.resizeMode);
       setCustomTextColor(newConfig.tickerTextColor);
       setCustomBgColor(newConfig.tickerBgColor);
@@ -366,29 +369,6 @@ export default function App() {
     return internalDir;
   }, [config]);
 
-  // Check storage permission
-  const checkStoragePermission = useCallback(async () => {
-    if (!PermissionModule) {
-      setHasStorage(true);
-      setPermissionsLoaded(true);
-      return;
-    }
-    try {
-      const storageGranted = await PermissionModule.checkStoragePermission();
-      setHasStorage(storageGranted);
-      
-      // Show permission popup if permission is not granted
-      if (!storageGranted) {
-        setShowPermissionPopup(true);
-      }
-    } catch (e) {
-      console.warn('Storage permission query failed:', e);
-      setShowPermissionPopup(true);
-    } finally {
-      setPermissionsLoaded(true);
-    }
-  }, []);
-
   // Request storage permission
   const requestPermission = useCallback(async () => {
     if (!PermissionModule) return;
@@ -406,6 +386,31 @@ export default function App() {
       console.warn('Failed to request storage permission:', e);
     }
   }, []);
+
+  // Check storage permission
+  const checkStoragePermission = useCallback(async () => {
+    if (!PermissionModule) {
+      setHasStorage(true);
+      setPermissionsLoaded(true);
+      return;
+    }
+    try {
+      const storageGranted = await PermissionModule.checkStoragePermission();
+      setHasStorage(storageGranted);
+      
+      // Auto-request permission if not granted (without showing popup for auto-boot scenarios)
+      if (!storageGranted) {
+        console.log('Storage permission not granted, auto-requesting...');
+        await requestPermission();
+      }
+    } catch (e) {
+      console.warn('Storage permission query failed:', e);
+      // Auto-request on error as well
+      await requestPermission();
+    } finally {
+      setPermissionsLoaded(true);
+    }
+  }, [requestPermission]);
 
   // Check permissions on mount and when app returns from settings screen
   useEffect(() => {
@@ -498,6 +503,7 @@ export default function App() {
         console.log('USB detected - auto-enabling pendrive mode');
         setShowUsbPopup(true);
         setConfig(prev => ({ ...prev, usePendrive: true }));
+        setTempConfig(prev => ({ ...prev, usePendrive: true }));
         
         // Auto-hide popup after 5 seconds
         setTimeout(() => {
@@ -505,15 +511,20 @@ export default function App() {
         }, 5000);
       }
       
-      // Auto-disable pendrive when USB is not mounted
+      // Auto-disable pendrive when USB is not mounted and auto-switch to internal storage
       if (!usbState.mounted && config.usePendrive) {
-        console.log('USB removed - auto-disabling pendrive mode');
+        console.log('USB removed - auto-disabling pendrive mode and switching to internal storage');
         setConfig(prev => ({ ...prev, usePendrive: false }));
+        setTempConfig(prev => ({ ...prev, usePendrive: false }));
+        // Automatically rescan to switch to internal storage without manual reload
+        setTimeout(() => {
+          scanFolder();
+        }, 500);
       }
     });
 
     return () => unsubscribe();
-  }, [config.usePendrive]);
+  }, [config.usePendrive, scanFolder]);
 
   // Kiosk mode - enable/disable native kiosk mode when config changes
   useEffect(() => {
@@ -557,6 +568,7 @@ export default function App() {
           // OK/Menu/Down button opens config settings
           if (!configOpen) {
             setConfigOpen(true);
+            setTempConfig(config); // Initialize tempConfig with current config
             setFocusedIndex(0);
           }
         }
@@ -568,7 +580,7 @@ export default function App() {
     } catch (e) {
       console.warn('Could not initialize TVEventHandler:', e);
     }
-  }, [configOpen]);
+  }, [configOpen, config]);
 
   // Back button closes config menu or blocks exit in kiosk mode
   useEffect(() => {
@@ -576,6 +588,7 @@ export default function App() {
       console.log('Back pressed - configOpen:', configOpen, 'kioskMode:', config.kioskMode);
       if (configOpen) {
         setConfigOpen(false);
+        setTempConfig(config); // Revert to actual config on cancel
         return true; // prevent default back press
       }
       if (config.kioskMode) {
@@ -591,7 +604,7 @@ export default function App() {
     );
 
     return () => backHandler.remove();
-  }, [configOpen, config.kioskMode]);
+  }, [configOpen, config.kioskMode, config]);
 
   // Play next file in queue
   const playNext = useCallback(() => {
@@ -812,6 +825,7 @@ export default function App() {
               // Tap on media also opens config
               if (!configOpen) {
                 setConfigOpen(true);
+                setTempConfig(config); // Initialize tempConfig with current config
                 setFocusedIndex(0);
               }
             }}
@@ -910,12 +924,12 @@ export default function App() {
                       onFocus={() => setFocusedId(`duration-${opt.value}`)}
                       onBlur={() => setFocusedId('')}
                       onPress={() => {
-                        setConfig({ ...config, slideDuration: opt.value });
+                        setTempConfig({ ...tempConfig, slideDuration: opt.value });
                         setFocusedIndex(idx);
                       }}
                       style={({ pressed, focused }: any) => [
                         styles.choiceBtnSingle,
-                        config.slideDuration === opt.value && styles.choiceActive,
+                        tempConfig.slideDuration === opt.value && styles.choiceActive,
                         (focused || focusedId === `duration-${opt.value}`) && styles.btnFocused,
                         pressed && styles.btnPressed,
                       ]}
@@ -923,7 +937,7 @@ export default function App() {
                       <Text
                         style={[
                           styles.choiceText,
-                          config.slideDuration === opt.value && styles.choiceTextActive,
+                          tempConfig.slideDuration === opt.value && styles.choiceTextActive,
                         ]}
                       >
                         {opt.label}
@@ -939,8 +953,8 @@ export default function App() {
                 <TextInput
                   id="ticker-text"
                   style={styles.textInput}
-                  value={config.tickerText}
-                  onChangeText={(text) => setConfig({ ...config, tickerText: text })}
+                  value={tempConfig.tickerText}
+                  onChangeText={(text) => setTempConfig({ ...tempConfig, tickerText: text })}
                   placeholder="Enter ticker text..."
                   placeholderTextColor="#64748b"
                   multiline={false}
@@ -963,12 +977,12 @@ export default function App() {
                       onFocus={() => setFocusedId(`textcolor-${color.value}`)}
                       onBlur={() => setFocusedId('')}
                       onPress={() => {
-                        setConfig({ ...config, tickerTextColor: color.value });
+                        setTempConfig({ ...tempConfig, tickerTextColor: color.value });
                         setCustomTextColor(color.value);
                       }}
                       style={({ pressed, focused }: any) => [
                         styles.colorBtn,
-                        config.tickerTextColor === color.value && styles.colorActive,
+                        tempConfig.tickerTextColor === color.value && styles.colorActive,
                         (focused || focusedId === `textcolor-${color.value}`) && styles.btnFocused,
                         pressed && styles.btnPressed,
                         { backgroundColor: color.value },
@@ -983,7 +997,7 @@ export default function App() {
                   onChangeText={(text) => {
                     setCustomTextColor(text);
                     if (/^#[0-9A-Fa-f]{6}$/.test(text)) {
-                      setConfig({ ...config, tickerTextColor: text });
+                      setTempConfig({ ...tempConfig, tickerTextColor: text });
                     }
                   }}
                   placeholder="#FFFFFF"
@@ -1008,12 +1022,12 @@ export default function App() {
                       onFocus={() => setFocusedId(`bgcolor-${color.value}`)}
                       onBlur={() => setFocusedId('')}
                       onPress={() => {
-                        setConfig({ ...config, tickerBgColor: color.value });
+                        setTempConfig({ ...tempConfig, tickerBgColor: color.value });
                         setCustomBgColor(color.value);
                       }}
                       style={({ pressed, focused }: any) => [
                         styles.colorBtn,
-                        config.tickerBgColor === color.value && styles.colorActive,
+                        tempConfig.tickerBgColor === color.value && styles.colorActive,
                         (focused || focusedId === `bgcolor-${color.value}`) && styles.btnFocused,
                         pressed && styles.btnPressed,
                         { backgroundColor: color.value === 'transparent' ? '#333' : color.value },
@@ -1032,7 +1046,7 @@ export default function App() {
                   onChangeText={(text) => {
                     setCustomBgColor(text);
                     if (/^#[0-9A-Fa-f]{6}$/.test(text) || text === 'transparent') {
-                      setConfig({ ...config, tickerBgColor: text });
+                      setTempConfig({ ...tempConfig, tickerBgColor: text });
                     }
                   }}
                   placeholder="#000000"
@@ -1056,10 +1070,10 @@ export default function App() {
                       focusable={true}
                       onFocus={() => setFocusedId(`position-${pos.value}`)}
                       onBlur={() => setFocusedId('')}
-                      onPress={() => setConfig({ ...config, tickerPosition: pos.value as 'top' | 'bottom' })}
+                      onPress={() => setTempConfig({ ...tempConfig, tickerPosition: pos.value as 'top' | 'bottom' })}
                       style={({ pressed, focused }: any) => [
                         styles.choiceBtnSingle,
-                        config.tickerPosition === pos.value && styles.choiceActive,
+                        tempConfig.tickerPosition === pos.value && styles.choiceActive,
                         (focused || focusedId === `position-${pos.value}`) && styles.btnFocused,
                         pressed && styles.btnPressed,
                       ]}
@@ -1067,7 +1081,7 @@ export default function App() {
                       <Text
                         style={[
                           styles.choiceText,
-                          config.tickerPosition === pos.value && styles.choiceTextActive,
+                          tempConfig.tickerPosition === pos.value && styles.choiceTextActive,
                         ]}
                       >
                         {pos.label}
@@ -1088,10 +1102,10 @@ export default function App() {
                       focusable={true}
                       onFocus={() => setFocusedId(`fontsize-${size.value}`)}
                       onBlur={() => setFocusedId('')}
-                      onPress={() => setConfig({ ...config, tickerFontSize: size.value })}
+                      onPress={() => setTempConfig({ ...tempConfig, tickerFontSize: size.value })}
                       style={({ pressed, focused }: any) => [
                         styles.choiceBtnSingle,
-                        config.tickerFontSize === size.value && styles.choiceActive,
+                        tempConfig.tickerFontSize === size.value && styles.choiceActive,
                         (focused || focusedId === `fontsize-${size.value}`) && styles.btnFocused,
                         pressed && styles.btnPressed,
                       ]}
@@ -1099,7 +1113,7 @@ export default function App() {
                       <Text
                         style={[
                           styles.choiceText,
-                          config.tickerFontSize === size.value && styles.choiceTextActive,
+                          tempConfig.tickerFontSize === size.value && styles.choiceTextActive,
                         ]}
                       >
                         {size.label}
@@ -1118,10 +1132,10 @@ export default function App() {
                     focusable={true}
                     onFocus={() => setFocusedId('kiosk-on')}
                     onBlur={() => setFocusedId('')}
-                    onPress={() => setConfig({ ...config, kioskMode: true })}
+                    onPress={() => setTempConfig({ ...tempConfig, kioskMode: true })}
                     style={({ pressed, focused }: any) => [
                       styles.choiceBtnSingle,
-                      config.kioskMode && styles.choiceActive,
+                      tempConfig.kioskMode && styles.choiceActive,
                       (focused || focusedId === 'kiosk-on') && styles.btnFocused,
                       pressed && styles.btnPressed,
                     ]}
@@ -1129,7 +1143,7 @@ export default function App() {
                     <Text
                       style={[
                         styles.choiceText,
-                        config.kioskMode && styles.choiceTextActive,
+                        tempConfig.kioskMode && styles.choiceTextActive,
                       ]}
                     >
                       ON
@@ -1140,10 +1154,10 @@ export default function App() {
                     focusable={true}
                     onFocus={() => setFocusedId('kiosk-off')}
                     onBlur={() => setFocusedId('')}
-                    onPress={() => setConfig({ ...config, kioskMode: false })}
+                    onPress={() => setTempConfig({ ...tempConfig, kioskMode: false })}
                     style={({ pressed, focused }: any) => [
                       styles.choiceBtnSingle,
-                      !config.kioskMode && styles.choiceActive,
+                      !tempConfig.kioskMode && styles.choiceActive,
                       (focused || focusedId === 'kiosk-off') && styles.btnFocused,
                       pressed && styles.btnPressed,
                     ]}
@@ -1151,7 +1165,7 @@ export default function App() {
                     <Text
                       style={[
                         styles.choiceText,
-                        !config.kioskMode && styles.choiceTextActive,
+                        !tempConfig.kioskMode && styles.choiceTextActive,
                       ]}
                     >
                       OFF
@@ -1169,10 +1183,10 @@ export default function App() {
                     focusable={true}
                     onFocus={() => setFocusedId('pendrive-on')}
                     onBlur={() => setFocusedId('')}
-                    onPress={() => setConfig({ ...config, usePendrive: true })}
+                    onPress={() => setTempConfig({ ...tempConfig, usePendrive: true })}
                     style={({ pressed, focused }: any) => [
                       styles.choiceBtnSingle,
-                      config.usePendrive && styles.choiceActive,
+                      tempConfig.usePendrive && styles.choiceActive,
                       (focused || focusedId === 'pendrive-on') && styles.btnFocused,
                       pressed && styles.btnPressed,
                     ]}
@@ -1180,7 +1194,7 @@ export default function App() {
                     <Text
                       style={[
                         styles.choiceText,
-                        config.usePendrive && styles.choiceTextActive,
+                        tempConfig.usePendrive && styles.choiceTextActive,
                       ]}
                     >
                       ON
@@ -1191,10 +1205,10 @@ export default function App() {
                     focusable={true}
                     onFocus={() => setFocusedId('pendrive-off')}
                     onBlur={() => setFocusedId('')}
-                    onPress={() => setConfig({ ...config, usePendrive: false })}
+                    onPress={() => setTempConfig({ ...tempConfig, usePendrive: false })}
                     style={({ pressed, focused }: any) => [
                       styles.choiceBtnSingle,
-                      !config.usePendrive && styles.choiceActive,
+                      !tempConfig.usePendrive && styles.choiceActive,
                       (focused || focusedId === 'pendrive-off') && styles.btnFocused,
                       pressed && styles.btnPressed,
                     ]}
@@ -1202,7 +1216,7 @@ export default function App() {
                     <Text
                       style={[
                         styles.choiceText,
-                        !config.usePendrive && styles.choiceTextActive,
+                        !tempConfig.usePendrive && styles.choiceTextActive,
                       ]}
                     >
                       OFF
@@ -1219,7 +1233,7 @@ export default function App() {
                   onFocus={() => setFocusedId('save-btn')}
                   onBlur={() => setFocusedId('')}
                   onPress={() => {
-                    saveConfig(config);
+                    saveConfig(tempConfig);
                     setConfigOpen(false);
                     scanFolder();
                   }}
@@ -1237,7 +1251,10 @@ export default function App() {
                   focusable={true}
                   onFocus={() => setFocusedId('cancel-btn')}
                   onBlur={() => setFocusedId('')}
-                  onPress={() => setConfigOpen(false)}
+                  onPress={() => {
+                    setConfigOpen(false);
+                    setTempConfig(config); // Revert to actual config on cancel
+                  }}
                   style={({ pressed, focused }: any) => [
                     styles.btnSecondarySingle,
                     (focused || focusedId === 'cancel-btn') && styles.btnFocused,
