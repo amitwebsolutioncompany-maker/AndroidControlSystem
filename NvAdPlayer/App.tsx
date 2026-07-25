@@ -839,6 +839,13 @@ export default function App() {
                 paused={configOpen}
                 onEnd={playNext}
                 onError={handleMediaError}
+                progressUpdateInterval={250}
+                playInBackground={false}
+                playWhenInactive={false}
+                controls={false}
+                fullscreen={false}
+                poster=""
+                posterResizeMode="stretch"
               />
             ) : (
               <Image
@@ -846,6 +853,7 @@ export default function App() {
                 style={styles.fullscreenMedia}
                 resizeMode="stretch"
                 onError={handleMediaError}
+                fadeDuration={0}
               />
             )}
           </Pressable>
