@@ -157,24 +157,6 @@
                 </div>
             </div>
 
-            <!-- One-Click Auto-Setup ADB Panel -->
-            <div class="connection-panel"
-                style="background: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.2); margin-top: 15px;">
-                <div class="sidebar-title" style="color: var(--success); margin-bottom: 6px; font-size: 13px;">
-                    <i class="fa-solid fa-bolt"></i> ADB Auto Setup
-                </div>
-                <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.4;">
-                    Click to download and configure ADB platform tools PATH automatically.
-                </p>
-                <button class="btn btn-success" id="autoSetupAdbBtn" style="width: 100%;">
-                    Setup ADB (One-Click)
-                </button>
-                <div id="adbSetupStatus"
-                    style="font-size: 11px; color: var(--text-muted); margin-top: 6px; text-align: center; font-weight: 500;">
-                    Status: Not started
-                </div>
-            </div>
-
         </aside>
 
         <!-- MAIN WINDOW: Content Panels -->
@@ -681,6 +663,8 @@
                                             signage.apk, cx file.apk</span>
                                     </label>
                                 </div>
+
+                               
                                 <!-- Step 11 -->
                                 <div class="checklist-item" data-index="11">
                                     <label class="checkbox-container">
@@ -745,6 +729,25 @@
                                     </label>
                                 </div>
                             </div>
+
+                             <!-- ADB Auto Setup -->
+                                <div class="connection-panel"
+                                    style="background: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.2); margin-top: 15px;">
+                                    <div class="sidebar-title" style="color: var(--success); margin-bottom: 6px; font-size: 13px;">
+                                        <i class="fa-solid fa-bolt"></i> ADB Auto Setup
+                                    </div>
+                                    <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.4;">
+                                        Click to download and configure ADB platform tools PATH automatically.
+                                    </p>
+                                    <button class="btn btn-success" id="autoSetupAdbBtn" style="width: 100%;">
+                                        Setup ADB (One-Click)
+                                    </button>
+                                    <div id="adbSetupStatus"
+                                        style="font-size: 11px; color: var(--text-muted); margin-top: 6px; text-align: center; font-weight: 500;">
+                                        Status: Not started
+                                    </div>
+                                </div>
+
                         </div>
 
                         <!-- Right Column: Open Factory Menu shortcuts & Scrcpy Setup -->
