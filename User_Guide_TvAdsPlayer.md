@@ -35,7 +35,7 @@ Welcome to the official User Guide for the **TvAdsPlayer** application. This gui
 * **Example:** The app automatically cycles through 5 promo videos and 10 sale images in alphabetical order.
 
 ### Dual-Storage Playback
-* **What it does:** Plays ads from the TV's internal memory (`TvAd` folder) or directly from a plugged-in USB drive (`Ads` folder).
+* **What it does:** Plays ads from the TV's internal memory (`nvsign` folder) or directly from a plugged-in USB drive (`nvsign` folder).
 * **Why it is useful:** Gives you flexibility. You can push ads wirelessly over a network or plug in a physical USB drive.
 * **Example:** Plug in a USB drive containing new videos; the app immediately starts playing them. Unplug it, and the app falls back to playing internal ads.
 
@@ -115,8 +115,8 @@ Once activated, the app will ask for permissions:
 
 ### Loading Advertisements via USB Pen Drive
 1. Insert a USB drive into your PC.
-2. Create a folder named **`Ads`** (exactly as written) at the root level of the drive.
-3. Copy your advertising videos and images into this `Ads` folder.
+2. Create a folder named **`nvsign`** (lowercase) at the root level of the drive.
+3. Copy your advertising videos and images into this `nvsign` folder.
 4. Plug the USB drive into the TV. The app will immediately display a popup: *"USB Pendrive Detected"* and start playing the files.
 
 ### Accessing TV Remote Settings Menu
@@ -151,9 +151,9 @@ Power On the TV screen
            ↓
 App automatically launches on boot
            ↓
-Checks for USB drive (If present, plays USB 'Ads' folder)
+Checks for USB drive (If present, plays USB 'nvsign' folder)
            ↓
-If no USB, plays internal '/sdcard/TvAd' folder
+If no USB, plays internal '/sdcard/nvsign' folder
            ↓
 Advertisements play in a continuous fullscreen loop
 ```
@@ -164,7 +164,7 @@ Advertisements play in a continuous fullscreen loop
 
 | Problem | Possible Reason | Solution |
 | :--- | :--- | :--- |
-| **"No Media Files Found" screen** | The folder is empty, or files are placed in the wrong folder. | Make sure files are in the `/sdcard/TvAd/` folder on TV memory, or inside the `Ads` folder on the USB drive. Check file extensions. |
+| **"No Media Files Found" screen** | The folder is empty, or files are placed in the wrong folder. | Make sure files are in the `/sdcard/nvsign/` folder on TV memory, or inside the `nvsign` folder on the USB drive. Check file extensions. |
 | **License Activation fails** | TV is not connected to the internet during activation, or the key is wrong. | Check TV Wi-Fi status. Make sure the license key matches the Device ID exactly. |
 | **Videos lag or drop frames** | Video resolution/bitrate is too high for the TV hardware. | Compress the video files to 1080p resolution at 30fps using a standard video encoder. |
 | **Ticker text does not appear** | Ticker text is empty, or overlay permission is missing. | Open settings drawer, type ticker text. Ensure "Display over other apps" is allowed in TV settings. |
@@ -188,7 +188,7 @@ Advertisements play in a continuous fullscreen loop
 
 * **Always Enable Kiosk Mode:** Keep Kiosk Mode enabled on display screens in public areas to prevent customers from closing the ads.
 * **Video Encoding:** Encode all videos as H.264 MP4 format at 1080p resolution for smooth playback on all TV hardware.
-* **USB File Sync:** When using USB drives, ensure the folder name is exactly `Ads` (capital A, lowercase ds).
+* **USB File Sync:** When using USB drives, ensure the folder name is exactly `nvsign`.
 
 ---
 
@@ -220,9 +220,9 @@ Advertisements play in a continuous fullscreen loop
 * **Icon:** `💾` (Save / USB)
 * **Bullet Points:**
   * Wirelessly push media files to TV internal storage
-  * Plug in a USB drive with an `Ads` folder to play directly
+  * Plug in a USB drive with an `nvsign` folder to play directly
   * Automatic fallback to internal memory when USB is removed
-* **Image Suggestion:** A USB pen drive being inserted into a TV port with a folder structure showing /Ads/ folder.
+* **Image Suggestion:** A USB pen drive being inserted into a TV port with a folder structure showing /nvsign/ folder.
 * **Speaker Notes:** You can wirelessly upload advertisements to the TV or simply plug in a USB pen drive.
 <!-- slide -->
 ### Slide 4: Device Activation
@@ -291,7 +291,7 @@ Advertisements play in a continuous fullscreen loop
 * **Bullet Points:**
   * Encode videos in H.264 MP4 format at 1080p
   * Check Kiosk Mode toggle ON in public stores
-  * Keep USB folder name as exactly `Ads`
-* **Image Suggestion:** A checkmark list outlining MP4 format, Kiosk ON, and Ads folder name.
+  * Keep USB folder name as exactly `nvsign`
+* **Image Suggestion:** A checkmark list outlining MP4 format and nvsign folder name.
 * **Speaker Notes:** Follow these best practices to ensure optimal performance and smooth advertisement playback.
 ````

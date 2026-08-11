@@ -45,8 +45,8 @@ const { PermissionModule } = NativeModules;
 // @ts-ignore
 const TVEventHandler = require('react-native').TVEventHandler;
 
-// Path to target TvAd directory in internal storage (/sdcard/TvAd)
-const ADS_DIR = `${RNFS.ExternalStorageDirectoryPath}/TvAd`;
+// Path to target nvsign directory in internal storage (/sdcard/nvsign)
+const ADS_DIR = `${RNFS.ExternalStorageDirectoryPath}/nvsign`;
 
 interface MediaItem {
   name: string;
@@ -54,8 +54,8 @@ interface MediaItem {
   type: 'image' | 'video';
 }
 
-const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'];
-const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.mkv', '.avi', '.3gp', '.webm'];
+const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tiff', '.tif', '.svg', '.ico', '.heic', '.heif', '.jp2', '.j2k', '.wbmp'];
+const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.mkv', '.avi', '.3gp', '.webm', '.flv', '.wmv', '.m4v', '.mpg', '.mpeg', '.ts', '.mts', '.m2ts', '.ogv', '.divx', '.xvid', '.asf', '.rm', '.rmvb', '.vob', '.f4v'];
 const DURATION_OPTIONS = [
   { label: '5 Sec', value: 5000 },
   { label: '10 Sec', value: 10000 },
@@ -108,7 +108,7 @@ interface AppConfig {
   tickerFontSize: number;
   usePendrive: boolean;
   resizeMode: 'contain' | 'cover' | 'stretch';
-  kioskMode: boolean;
+  kioskMode?: boolean;
 }
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -120,7 +120,7 @@ const DEFAULT_CONFIG: AppConfig = {
   tickerFontSize: 16,
   usePendrive: false,
   resizeMode: 'stretch',
-  kioskMode: true,
+  kioskMode: false,
 };
 
 export default function App() {
@@ -322,47 +322,46 @@ export default function App() {
   // USB Storage Ads folder auto-detection using native UsbManagerModule
   const resolveAdsDirectory = useCallback(async () => {
     console.log('=== resolveAdsDirectory START ===');
-    console.log('usePendrive config value:', config.usePendrive);
     console.log('UsbModule available:', isUsbModuleAvailable());
     
-    // If pendrive is enabled in config, try to find USB first
-    if (config.usePendrive && isUsbModuleAvailable()) {
-      console.log('>>> PENDRIVE MODE: Using native UsbManagerModule...');
+    if (isUsbModuleAvailable()) {
       try {
         const usbState = await getCurrentUsbState();
         console.log('USB State received:', JSON.stringify(usbState));
         console.log('USB mounted:', usbState.mounted);
-        console.log('USB hasPlayableMedia:', usbState.hasPlayableMedia);
         console.log('USB mountPath:', usbState.mountPath);
-        console.log('USB playlistSize:', usbState.playlist?.length);
         
-        if (usbState.mounted && usbState.hasPlayableMedia && usbState.mountPath) {
-          const usbAdsPath = `${usbState.mountPath}/Ads`;
-          console.log(`✓✓✓ SUCCESS: USB mounted with playable media at ${usbAdsPath}`);
-          return usbAdsPath;
+        if (usbState.mounted && usbState.mountPath) {
+          const usbAdsPath = `${usbState.mountPath}/nvsign`;
+          const usbFolderExists = await RNFS.exists(usbAdsPath);
+          console.log(`USB nvsign folder exists: ${usbFolderExists}`);
+          if (usbFolderExists) {
+            console.log(`✓✓✓ SUCCESS: Using USB nvsign folder at ${usbAdsPath}`);
+            return usbAdsPath;
+          }
         }
         
-        console.log('USB mounted but no playable media found, falling back to internal storage');
+        console.log('USB not mounted or nvsign folder not found on USB, falling back to internal storage');
       } catch (e) {
         console.error('Error getting USB state:', e);
       }
     }
 
-    // Default to internal storage TvAd folder
-    console.log('>>> INTERNAL STORAGE MODE: Using internal storage TvAd folder');
-    const internalDir = `${RNFS.ExternalStorageDirectoryPath}/TvAd`;
+    // Default to internal storage nvsign folder
+    console.log('>>> INTERNAL STORAGE MODE: Using internal storage nvsign folder');
+    const internalDir = `${RNFS.ExternalStorageDirectoryPath}/nvsign`;
     const internalExists = await RNFS.exists(internalDir);
-    console.log(`TvAd folder exists: ${internalExists}`);
+    console.log(`nvsign folder exists: ${internalExists}`);
     
     if (!internalExists) {
-      console.log('Creating TvAd folder...');
+      console.log('Creating nvsign folder...');
       await RNFS.mkdir(internalDir);
     }
     
     console.log('=== resolveAdsDirectory END ===');
     console.log('Returning internal path:', internalDir);
     return internalDir;
-  }, [config]);
+  }, []);
 
   // Request storage permission
   const requestPermission = useCallback(async () => {
@@ -424,7 +423,7 @@ export default function App() {
     };
   }, [checkStoragePermission, loadConfig]);
 
-  // Scan and load media files
+  // Scan and load media files with memory optimization
   const scanFolder = useCallback(async () => {
     console.log('=== scanFolder START ===');
     setLoading(true);
@@ -449,18 +448,16 @@ export default function App() {
       console.log('Total files found:', files.length);
       const list: MediaItem[] = [];
 
-      files.forEach((file) => {
+      for (const file of files) {
         if (file.isFile()) {
           const ext = '.' + file.name.split('.').pop()?.toLowerCase();
           if (IMAGE_EXTENSIONS.includes(ext)) {
-            console.log(`Image file: ${file.name}`);
             list.push({
               name: file.name,
               path: file.path,
               type: 'image',
             });
           } else if (VIDEO_EXTENSIONS.includes(ext)) {
-            console.log(`Video file: ${file.name}`);
             list.push({
               name: file.name,
               path: file.path,
@@ -468,7 +465,7 @@ export default function App() {
             });
           }
         }
-      });
+      }
 
       console.log(`Total media files: ${list.length}`);
       
@@ -486,40 +483,28 @@ export default function App() {
     }
   }, [config.usePendrive, resolveAdsDirectory]);
 
-  // Auto USB detection - toggle pendrive config based on USB mount status
+  // Auto USB detection - switch between USB nvsign and internal storage nvsign automatically
   useEffect(() => {
     if (!isUsbModuleAvailable()) return;
 
     const unsubscribe = subscribeUsbState((usbState) => {
       console.log('USB state changed:', JSON.stringify(usbState));
-      
-      // Auto-enable pendrive when USB is mounted with playable media
-      if (usbState.mounted && usbState.hasPlayableMedia && !config.usePendrive) {
-        console.log('USB detected - auto-enabling pendrive mode');
+      if (usbState.mounted) {
+        console.log('USB detected - scanning USB storage...');
         setShowUsbPopup(true);
-        setConfig(prev => ({ ...prev, usePendrive: true }));
-        setTempConfig(prev => ({ ...prev, usePendrive: true }));
-        
-        // Auto-hide popup after 5 seconds
         setTimeout(() => {
           setShowUsbPopup(false);
         }, 5000);
+      } else {
+        console.log('USB removed - switching back to internal storage...');
       }
-      
-      // Auto-disable pendrive when USB is not mounted and auto-switch to internal storage
-      if (!usbState.mounted && config.usePendrive) {
-        console.log('USB removed - auto-disabling pendrive mode and switching to internal storage');
-        setConfig(prev => ({ ...prev, usePendrive: false }));
-        setTempConfig(prev => ({ ...prev, usePendrive: false }));
-        // Automatically rescan to switch to internal storage without manual reload
-        setTimeout(() => {
-          scanFolder();
-        }, 500);
-      }
+      setTimeout(() => {
+        scanFolder();
+      }, 500);
     });
 
     return () => unsubscribe();
-  }, [config.usePendrive, scanFolder]);
+  }, [scanFolder]);
 
   // Kiosk mode - enable/disable native kiosk mode when config changes
   useEffect(() => {
@@ -577,18 +562,14 @@ export default function App() {
     }
   }, [configOpen, config]);
 
-  // Back button closes config menu or blocks exit in kiosk mode
+  // Back button closes config menu or exits app
   useEffect(() => {
     const backAction = () => {
-      console.log('Back pressed - configOpen:', configOpen, 'kioskMode:', config.kioskMode);
+      console.log('Back pressed - configOpen:', configOpen);
       if (configOpen) {
         setConfigOpen(false);
         setTempConfig(config); // Revert to actual config on cancel
         return true; // prevent default back press
-      }
-      if (config.kioskMode) {
-        console.log('Kiosk mode enabled - blocking back button');
-        return true; // block back button in kiosk mode
       }
       return false; // exit app normally
     };
@@ -599,16 +580,20 @@ export default function App() {
     );
 
     return () => backHandler.remove();
-  }, [configOpen, config.kioskMode, config]);
+  }, [configOpen, config]);
 
-  // Play next file in queue
+  // Play next file in queue with proper looping
   const playNext = useCallback(() => {
-    if (mediaFiles.length <= 1) {
+    if (mediaFiles.length === 0) return;
+    
+    if (mediaFiles.length === 1) {
       // Loop same item (reset index to reload)
       setCurrentIndex((prev) => (prev === 0 ? -1 : 0));
       setTimeout(() => setCurrentIndex(0), 100);
       return;
     }
+    
+    // Move to next file, loop back to start when reaching end
     setCurrentIndex((prev) => (prev + 1) % mediaFiles.length);
   }, [mediaFiles]);
 
@@ -786,7 +771,7 @@ export default function App() {
           </View>
           
           <Text style={styles.infoText}>
-            Please copy images (.jpg, .png, .webp, .gif, .bmp) or videos (.mp4, .mkv, .mov, etc.) into the 'TvAd' folder in your internal main storage and try again.
+            Please copy images (.jpg, .jpeg, .png, .webp, .gif, .bmp, .tiff, .svg, .heic, etc.) or videos (.mp4, .mkv, .mov, .avi, .webm, .flv, .wmv, .m4v, .mpeg, .ts, etc.) into the 'nvsign' folder in your internal main storage or USB pendrive and try again.
           </Text>
 
           <Pressable
@@ -834,13 +819,24 @@ export default function App() {
                 paused={configOpen}
                 onEnd={playNext}
                 onError={handleMediaError}
-                progressUpdateInterval={250}
+                progressUpdateInterval={1000}
                 playInBackground={false}
                 playWhenInactive={false}
                 controls={false}
                 fullscreen={false}
                 poster=""
                 posterResizeMode="stretch"
+                // Optimized for local file playback
+                bufferConfig={{
+                  minBufferMs: 5000,
+                  maxBufferMs: 30000,
+                  bufferForPlaybackMs: 1500,
+                  bufferForPlaybackAfterRebufferMs: 3000,
+                }}
+                preferredForwardBufferDuration={15}
+                onLoad={(data) => {
+                  setErrorCount(0);
+                }}
               />
             ) : (
               <Image
@@ -1126,56 +1122,6 @@ export default function App() {
                 </View>
               </View>
 
-              {/* Kiosk Mode Option */}
-              <View style={styles.settingSectionSingle}>
-                <Text style={styles.sectionTitle}>Kiosk Mode (Block Exit):</Text>
-                <View style={styles.singleColumn}>
-                  <Pressable
-                    id="kiosk-on"
-                    focusable={true}
-                    onFocus={() => setFocusedId('kiosk-on')}
-                    onBlur={() => setFocusedId('')}
-                    onPress={() => setTempConfig({ ...tempConfig, kioskMode: true })}
-                    style={({ pressed, focused }: any) => [
-                      styles.choiceBtnSingle,
-                      tempConfig.kioskMode && styles.choiceActive,
-                      (focused || focusedId === 'kiosk-on') && styles.btnFocused,
-                      pressed && styles.btnPressed,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.choiceText,
-                        tempConfig.kioskMode && styles.choiceTextActive,
-                      ]}
-                    >
-                      ON
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    id="kiosk-off"
-                    focusable={true}
-                    onFocus={() => setFocusedId('kiosk-off')}
-                    onBlur={() => setFocusedId('')}
-                    onPress={() => setTempConfig({ ...tempConfig, kioskMode: false })}
-                    style={({ pressed, focused }: any) => [
-                      styles.choiceBtnSingle,
-                      !tempConfig.kioskMode && styles.choiceActive,
-                      (focused || focusedId === 'kiosk-off') && styles.btnFocused,
-                      pressed && styles.btnPressed,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.choiceText,
-                        !tempConfig.kioskMode && styles.choiceTextActive,
-                      ]}
-                    >
-                      OFF
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
 
               {/* Pendrive Option */}
               <View style={styles.settingSectionSingle}>

@@ -46,7 +46,7 @@ public class UsbManagerModule extends ReactContextBaseJavaModule {
     private static final String TAG = "UsbManagerModule";
     private static final long USB_DEBOUNCE_MS = 250L;
     private static final long USB_MOUNT_SETTLE_RESCAN_MS = 2000L;
-    private static final String ADS_DIR_NAME = "Ads";
+    private static final String ADS_DIR_NAME = "nvsign";
     private static final List<String> SUPPORTED_EXTENSIONS = Arrays.asList(
             ".mp4",
             ".m4v",
@@ -291,7 +291,7 @@ public class UsbManagerModule extends ReactContextBaseJavaModule {
             String[] selectionArgs = new String[] {
                     String.valueOf(MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE),
                     String.valueOf(MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO),
-                    "ads/%",
+                    "nvsign/%",
                     pathPrefix
             };
 
@@ -549,7 +549,7 @@ public class UsbManagerModule extends ReactContextBaseJavaModule {
                 .trim();
         if (normalized.isEmpty()) return false;
         String lower = normalized.toLowerCase(Locale.US);
-        return "ads".equals(lower) || "ads/".equals(lower) || lower.startsWith("ads/");
+        return "nvsign".equals(lower) || "nvsign/".equals(lower) || lower.startsWith("nvsign/");
     }
 
     private boolean isAdsDataPath(String dataPath, File mountRoot) {
