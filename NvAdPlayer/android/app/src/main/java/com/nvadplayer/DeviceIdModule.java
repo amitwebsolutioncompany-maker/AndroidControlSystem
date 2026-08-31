@@ -1,5 +1,7 @@
 package com.nvadplayer;
 
+import android.app.Activity;
+import android.content.pm.ActivityInfo;
 import android.provider.Settings;
 import android.content.Context;
 
@@ -27,5 +29,22 @@ public class DeviceIdModule extends ReactContextBaseJavaModule {
                 context.getContentResolver(),
                 Settings.Secure.ANDROID_ID
         );
+    }
+
+    @ReactMethod
+    public void applyOrientation(String orientation) {
+        final Activity activity = getCurrentActivity();
+        if (activity == null) return;
+
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        });
     }
 }

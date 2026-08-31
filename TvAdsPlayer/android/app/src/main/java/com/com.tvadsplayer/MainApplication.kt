@@ -19,6 +19,10 @@ class MainApplication : Application(), ReactApplication {
           add(UsbManagerPackage())
           add(KioskPackage())
           add(DeviceIdPackage())
+          add(VideoFrameExtractorPackage())
+          add(SimpleWebViewPackage())
+          add(NativeVideoPlayerPackage())
+          add(AndroidNativeMediaPlayerPackage())
         },
     )
   }

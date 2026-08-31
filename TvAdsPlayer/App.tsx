@@ -18,6 +18,8 @@ import {
   Platform,
   Alert,
   Linking,
+  Dimensions,
+  useWindowDimensions,
   NativeModules as RNNativeModules,
 } from 'react-native';
 import RNFS from 'react-native-fs';
@@ -53,6 +55,145 @@ interface MediaItem {
   path: string;
   type: 'image' | 'video';
 }
+
+interface SectionData {
+  id: string;
+  title: string;
+  files: MediaItem[];
+}
+
+import { requireNativeComponent } from 'react-native';
+
+const NativeExoPlayer = requireNativeComponent<any>('NativeVideoPlayerView');
+const NativeAndroidMediaPlayer = requireNativeComponent<any>('AndroidNativeMediaPlayerView');
+const NativeChromiumPlayer = requireNativeComponent<any>('SecondaryWebViewPlayer');
+
+interface SectionPlayerProps {
+  section: SectionData;
+  sectionIndex: number;
+  totalSections: number;
+  config: AppConfig;
+  configOpen: boolean;
+  onOpenConfig: () => void;
+}
+
+const SectionPlayer: React.FC<SectionPlayerProps> = ({
+  section,
+  sectionIndex,
+  totalSections,
+  config,
+  configOpen,
+  onOpenConfig,
+}) => {
+  const [currentIndex, setCurrentIndex] = useState<number>(0);
+  const [errorCount, setErrorCount] = useState<number>(0);
+  const [reloadToken, setReloadToken] = useState<number>(0);
+
+  const mediaFiles = section.files;
+
+  const playNext = useCallback(() => {
+    if (mediaFiles.length <= 1) {
+      setCurrentIndex((prev) => (prev === 0 ? -1 : 0));
+      setTimeout(() => setCurrentIndex(0), 100);
+      return;
+    }
+    setCurrentIndex((prev) => (prev + 1) % mediaFiles.length);
+  }, [mediaFiles]);
+
+  const handleMediaError = useCallback(() => {
+    console.warn(`[Section ${section.id}] Error loading file: ${mediaFiles[currentIndex]?.name}`);
+    setErrorCount((prev) => prev + 1);
+    
+    // In multi-pane TV layout, decoders take 1.2s to reset / become available
+    setTimeout(() => {
+      if (errorCount >= mediaFiles.length) {
+        playNext();
+      } else {
+        setReloadToken((prev) => prev + 1);
+      }
+    }, 1200);
+  }, [section.id, mediaFiles, currentIndex, errorCount, playNext]);
+
+  // Image slide duration timer
+  useEffect(() => {
+    if (mediaFiles.length === 0 || configOpen) return;
+
+    const itemIndex = currentIndex === -1 ? 0 : currentIndex;
+    const currentMedia = mediaFiles[itemIndex];
+    if (currentMedia && currentMedia.type === 'image') {
+      const timer = setTimeout(() => {
+        playNext();
+      }, config.slideDuration);
+
+      return () => clearTimeout(timer);
+    }
+  }, [currentIndex, mediaFiles, config.slideDuration, configOpen, playNext]);
+
+  const itemIndex = currentIndex === -1 ? 0 : currentIndex;
+  const currentMedia = mediaFiles[itemIndex];
+
+  if (!currentMedia || mediaFiles.length === 0) {
+    return (
+      <View style={styles.emptySectionContainer}>
+        <Text style={styles.emptySectionText}>No media in {section.title}</Text>
+      </View>
+    );
+  }
+
+  const sectionKey = `section-${sectionIndex}-${currentMedia.path}-${reloadToken}`;
+
+  return (
+    <Pressable
+      focusable={!configOpen}
+      hasTVPreferredFocus={!configOpen && sectionIndex === 0}
+      style={styles.mediaWrapper}
+      onPress={() => {
+        if (!configOpen) {
+          onOpenConfig();
+        }
+      }}
+    >
+      {currentMedia.type === 'video' ? (
+        sectionIndex === 0 ? (
+          // Master Section 1: Native ExoPlayer (Hardware VPU Player with Audio)
+          <NativeExoPlayer
+            key={`exo_${sectionKey}`}
+            srcPath={currentMedia.path}
+            muted={false}
+            isSecondary={false}
+            repeat={mediaFiles.length === 1}
+            paused={configOpen}
+            resizeMode={config.resizeMode || 'stretch'}
+            onVideoEnd={playNext}
+            onVideoError={handleMediaError}
+            style={styles.fullscreenMedia}
+          />
+        ) : (
+          // Secondary Sections 2, 3, 4: Android Native System C++ MediaPlayer (Guaranteed Local File Support & Zero Conflict)
+          <NativeAndroidMediaPlayer
+            key={`native_media_${sectionKey}`}
+            srcPath={currentMedia.path}
+            muted={true}
+            repeat={mediaFiles.length === 1}
+            paused={configOpen}
+            resizeMode={config.resizeMode || 'stretch'}
+            onVideoEnd={playNext}
+            onVideoError={handleMediaError}
+            style={styles.fullscreenMedia}
+          />
+        )
+      ) : (
+        <Image
+          source={{ uri: `file://${currentMedia.path}` }}
+          style={styles.fullscreenMedia}
+          resizeMode={config.resizeMode || 'stretch'}
+          onError={handleMediaError}
+          fadeDuration={0}
+        />
+      )}
+    </Pressable>
+  );
+};
 
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tiff', '.tif', '.svg', '.ico', '.heic', '.heif', '.jp2', '.j2k', '.wbmp'];
 const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.mkv', '.avi', '.3gp', '.webm', '.flv', '.wmv', '.m4v', '.mpg', '.mpeg', '.ts', '.mts', '.m2ts', '.ogv', '.divx', '.xvid', '.asf', '.rm', '.rmvb', '.vob', '.f4v'];
@@ -98,6 +239,13 @@ const FONT_SIZE_OPTIONS = [
   { label: 'XX-Large', value: 60 },
 ];
 
+const ORIENTATION_OPTIONS = [
+  { label: 'Horizontal (Landscape)', value: 'horizontal' },
+  { label: 'Reverse Horizontal', value: 'reverse-horizontal' },
+  { label: 'Vertical (Portrait)', value: 'vertical' },
+  { label: 'Reverse Vertical', value: 'reverse-vertical' },
+];
+
 // Config interface
 interface AppConfig {
   slideDuration: number;
@@ -109,6 +257,7 @@ interface AppConfig {
   usePendrive: boolean;
   resizeMode: 'contain' | 'cover' | 'stretch';
   kioskMode?: boolean;
+  orientation?: 'horizontal' | 'reverse-horizontal' | 'vertical' | 'reverse-vertical';
 }
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -121,11 +270,11 @@ const DEFAULT_CONFIG: AppConfig = {
   usePendrive: false,
   resizeMode: 'stretch',
   kioskMode: false,
+  orientation: 'horizontal',
 };
 
 export default function App() {
-  const [mediaFiles, setMediaFiles] = useState<MediaItem[]>([]);
-  const [currentIndex, setCurrentIndex] = useState<number>(0);
+  const [sections, setSections] = useState<SectionData[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [configOpen, setConfigOpen] = useState<boolean>(false);
@@ -293,11 +442,15 @@ export default function App() {
       const savedConfig = await AsyncStorage.getItem('tvads_config');
       if (savedConfig) {
         const parsed = JSON.parse(savedConfig);
-        setConfig(parsed);
-        setTempConfig(parsed);
-        setResizeMode(parsed.resizeMode || 'stretch');
-        setCustomTextColor(parsed.tickerTextColor || '#FFFFFF');
-        setCustomBgColor(parsed.tickerBgColor || '#000000');
+        const merged = { ...DEFAULT_CONFIG, ...parsed };
+        setConfig(merged);
+        setTempConfig(merged);
+        setResizeMode(merged.resizeMode || 'stretch');
+        setCustomTextColor(merged.tickerTextColor || '#FFFFFF');
+        setCustomBgColor(merged.tickerBgColor || '#000000');
+        if (merged.orientation) {
+          (RNNativeModules as any)?.DeviceIdModule?.applyOrientation?.(merged.orientation);
+        }
       }
     } catch (e) {
       console.warn('Failed to load config:', e);
@@ -313,6 +466,9 @@ export default function App() {
       setResizeMode(newConfig.resizeMode);
       setCustomTextColor(newConfig.tickerTextColor);
       setCustomBgColor(newConfig.tickerBgColor);
+      if (newConfig.orientation) {
+        (RNNativeModules as any)?.DeviceIdModule?.applyOrientation?.(newConfig.orientation);
+      }
       console.log('Config saved:', newConfig);
     } catch (e) {
       console.warn('Failed to save config:', e);
@@ -423,7 +579,7 @@ export default function App() {
     };
   }, [checkStoragePermission, loadConfig]);
 
-  // Scan and load media files with memory optimization
+  // Scan and load section media folders with memory optimization
   const scanFolder = useCallback(async () => {
     console.log('=== scanFolder START ===');
     setLoading(true);
@@ -437,51 +593,116 @@ export default function App() {
       // Check if directory exists before reading
       const dirExists = await RNFS.exists(resolvedDir);
       console.log('Directory exists:', dirExists);
-      
+
       if (!dirExists) {
         console.log('Directory does not exist, creating it:', resolvedDir);
         await RNFS.mkdir(resolvedDir);
       }
 
       console.log('Reading directory contents...');
-      const files = await RNFS.readDir(resolvedDir);
-      console.log('Total files found:', files.length);
-      const list: MediaItem[] = [];
+      const entries = await RNFS.readDir(resolvedDir);
+      console.log('Total entries found:', entries.length);
 
-      for (const file of files) {
-        if (file.isFile()) {
-          const ext = '.' + file.name.split('.').pop()?.toLowerCase();
-          if (IMAGE_EXTENSIONS.includes(ext)) {
-            list.push({
-              name: file.name,
-              path: file.path,
-              type: 'image',
-            });
-          } else if (VIDEO_EXTENSIONS.includes(ext)) {
-            list.push({
-              name: file.name,
-              path: file.path,
-              type: 'video',
-            });
+      // Find subdirectories matching section1, section2, section3, etc.
+      const sectionDirs = entries.filter((e) => e.isDirectory() && /^section/i.test(e.name));
+
+      // Sort section directories numerically: section1, section2, section3, etc.
+      sectionDirs.sort((a, b) => {
+        const numA = parseInt(a.name.replace(/\D/g, ''), 10) || 0;
+        const numB = parseInt(b.name.replace(/\D/g, ''), 10) || 0;
+        if (numA !== numB) return numA - numB;
+        return a.name.localeCompare(b.name);
+      });
+
+      const sectionsList: SectionData[] = [];
+
+      if (sectionDirs.length > 0) {
+        console.log(`Found ${sectionDirs.length} section directories in nvsign`);
+        for (const sDir of sectionDirs) {
+          const sFiles = await RNFS.readDir(sDir.path);
+          const list: MediaItem[] = [];
+          for (const file of sFiles) {
+            if (file.isFile()) {
+              const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+              if (IMAGE_EXTENSIONS.includes(ext)) {
+                list.push({ name: file.name, path: file.path, type: 'image' });
+              } else if (VIDEO_EXTENSIONS.includes(ext)) {
+                list.push({ name: file.name, path: file.path, type: 'video' });
+              }
+            }
+          }
+          list.sort((a, b) => a.name.localeCompare(b.name));
+          sectionsList.push({
+            id: sDir.name,
+            title: sDir.name.toUpperCase(),
+            files: list,
+          });
+        }
+      } else {
+        // Fallback: No section directories found, scan files directly in root nvsign as Section 1
+        console.log('No section directories found. Reading root nvsign files as Section 1');
+        const list: MediaItem[] = [];
+        for (const file of entries) {
+          if (file.isFile()) {
+            const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+            if (IMAGE_EXTENSIONS.includes(ext)) {
+              list.push({ name: file.name, path: file.path, type: 'image' });
+            } else if (VIDEO_EXTENSIONS.includes(ext)) {
+              list.push({ name: file.name, path: file.path, type: 'video' });
+            }
           }
         }
+        list.sort((a, b) => a.name.localeCompare(b.name));
+        sectionsList.push({
+          id: 'section1',
+          title: 'SECTION 1',
+          files: list,
+        });
       }
 
-      console.log(`Total media files: ${list.length}`);
-      
-      // Sort alphabetically so sorting remains consistent
-      list.sort((a, b) => a.name.localeCompare(b.name));
-
-      console.log('Found media files:', list.length);
-      setMediaFiles(list);
-      setCurrentIndex(0);
+      console.log(`Loaded ${sectionsList.length} sections into player state.`);
+      setSections(sectionsList);
     } catch (err) {
       console.warn('Error reading Ads directory:', err);
-      setMediaFiles([]);
+      setSections([]);
     } finally {
       setLoading(false);
     }
   }, [config.usePendrive, resolveAdsDirectory]);
+
+  // Helper for responsive split-screen layouts
+  const getSectionStyle = (index: number, count: number) => {
+    if (count <= 1) {
+      return { flex: 1, width: '100%' as const, height: '100%' as const };
+    }
+    if (count === 2) {
+      return {
+        flex: 1,
+        height: '100%' as const,
+        borderRightWidth: index === 0 ? 2 : 0,
+        borderColor: '#3b82f6',
+      };
+    }
+    if (count === 3) {
+      return {
+        flex: 1,
+        height: '100%' as const,
+        borderRightWidth: index < 2 ? 2 : 0,
+        borderColor: '#3b82f6',
+      };
+    }
+    // 4 or more sections: grid layout (50% width, 50% height)
+    return {
+      width: '50%' as const,
+      height: '50%' as const,
+      borderRightWidth: index % 2 === 0 ? 1 : 0,
+      borderBottomWidth: index < 2 ? 1 : 0,
+      borderColor: '#3b82f6',
+    };
+  };
+
+  // Check if all sections are empty
+  const totalMediaCount = sections.reduce((acc, sec) => acc + sec.files.length, 0);
 
   // Auto USB detection - switch between USB nvsign and internal storage nvsign automatically
   useEffect(() => {
@@ -581,50 +802,6 @@ export default function App() {
 
     return () => backHandler.remove();
   }, [configOpen, config]);
-
-  // Play next file in queue with proper looping
-  const playNext = useCallback(() => {
-    if (mediaFiles.length === 0) return;
-    
-    if (mediaFiles.length === 1) {
-      // Loop same item (reset index to reload)
-      setCurrentIndex((prev) => (prev === 0 ? -1 : 0));
-      setTimeout(() => setCurrentIndex(0), 100);
-      return;
-    }
-    
-    // Move to next file, loop back to start when reaching end
-    setCurrentIndex((prev) => (prev + 1) % mediaFiles.length);
-  }, [mediaFiles]);
-
-  // Handle image timer
-  useEffect(() => {
-    if (mediaFiles.length === 0 || configOpen || loading) return;
-
-    const currentMedia = mediaFiles[currentIndex === -1 ? 0 : currentIndex];
-    if (currentMedia && currentMedia.type === 'image') {
-      const timer = setTimeout(() => {
-        playNext();
-      }, config.slideDuration);
-
-      return () => clearTimeout(timer);
-    }
-  }, [currentIndex, mediaFiles, config.slideDuration, configOpen, loading, playNext]);
-
-  // Handle media errors gracefully to prevent player stuck screen
-  const handleMediaError = () => {
-    console.warn('Error loading file: ' + mediaFiles[currentIndex]?.name);
-    setErrorCount((prev) => prev + 1);
-    
-    // If consecutive errors exceed the total count, avoid fast-spinning loop
-    if (errorCount < mediaFiles.length) {
-      setTimeout(() => {
-        playNext();
-      }, 2500);
-    }
-  };
-
-  const currentMedia = mediaFiles[currentIndex === -1 ? 0 : currentIndex];
 
   // Show license screen if not licensed
   if (!licensed && licenseReady) {
@@ -756,7 +933,7 @@ export default function App() {
   }
 
   // Render instructions screen if folder is empty or not readable
-  if (mediaFiles.length === 0) {
+  if (totalMediaCount === 0) {
     return (
       <View style={styles.darkContainer}>
         <StatusBar hidden />
@@ -771,7 +948,7 @@ export default function App() {
           </View>
           
           <Text style={styles.infoText}>
-            Please copy images (.jpg, .jpeg, .png, .webp, .gif, .bmp, .tiff, .svg, .heic, etc.) or videos (.mp4, .mkv, .mov, .avi, .webm, .flv, .wmv, .m4v, .mpeg, .ts, etc.) into the 'nvsign' folder in your internal main storage or USB pendrive and try again.
+            Please copy images (.jpg, .jpeg, .png, .webp, .gif, .bmp, .tiff, .svg, .heic, etc.) or videos (.mp4, .mkv, .mov, .avi, .webm, .flv, .wmv, .m4v, .mpeg, .ts, etc.) into 'section1', 'section2', etc. inside the 'nvsign' folder in your internal main storage or USB pendrive and try again.
           </Text>
 
           <Pressable
@@ -789,113 +966,219 @@ export default function App() {
     );
   }
 
+  const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+  const width = Math.max(screenWidth || 1920, screenHeight || 1080);
+  const height = Math.min(screenWidth || 1920, screenHeight || 1080);
+
+  const orientation = config.orientation || 'horizontal';
+
+  let rotation = '0deg';
+  let containerWidth = width;
+  let containerHeight = height;
+
+  if (orientation === 'vertical') {
+    rotation = '90deg';
+    containerWidth = height;
+    containerHeight = width;
+  } else if (orientation === 'reverse-vertical') {
+    rotation = '-90deg';
+    containerWidth = height;
+    containerHeight = width;
+  } else if (orientation === 'reverse-horizontal') {
+    rotation = '180deg';
+    containerWidth = width;
+    containerHeight = height;
+  } else {
+    rotation = '0deg';
+    containerWidth = width;
+    containerHeight = height;
+  }
+
+  const topOffset = (height - containerHeight) / 2;
+  const leftOffset = (width - containerWidth) / 2;
+
   return (
-    <View style={styles.viewerContainer}>
-      <StatusBar hidden />
+    <View
+      style={{
+        width: containerWidth,
+        height: containerHeight,
+        position: 'absolute',
+        top: topOffset,
+        left: leftOffset,
+        transform: [{ rotate: rotation }],
+        backgroundColor: '#000000',
+        overflow: 'hidden',
+      }}
+    >
+      <View style={styles.viewerContainer}>
+        <StatusBar hidden />
       
-      {/* Fullscreen Player */}
-      {currentMedia && (
-        <View style={styles.mediaContainer}>
-          {/* Media Player - Always takes full space */}
-          <Pressable
-            focusable={!configOpen}
-            hasTVPreferredFocus={!configOpen}
-            style={styles.mediaWrapper}
-            onPress={() => {
-              // Tap on media also opens config
-              if (!configOpen) {
-                setConfigOpen(true);
-                setTempConfig(config); // Initialize tempConfig with current config
-                setFocusedIndex(0);
-              }
+      {/* Dynamic Split Screen View for Section 1, Section 2, Section 3, Section 4 */}
+      {sections.length > 0 && (
+        <View style={styles.splitScreenContainer}>
+          {sections.length <= 1 ? (
+            <View style={styles.fullCell}>
+              <SectionPlayer
+                section={sections[0]}
+                sectionIndex={0}
+                totalSections={1}
+                config={config}
+                configOpen={configOpen}
+                onOpenConfig={() => {
+                  setConfigOpen(true);
+                  setTempConfig(config);
+                  setFocusedIndex(0);
+                }}
+              />
+            </View>
+          ) : sections.length === 2 ? (
+            <View style={styles.rowLayout}>
+              {sections.map((sec, idx) => (
+                <View
+                  key={sec.id || idx}
+                  style={[
+                    styles.flexCell,
+                    { borderRightWidth: idx === 0 ? 2 : 0, borderColor: '#3b82f6' },
+                  ]}
+                >
+                  <SectionPlayer
+                    section={sec}
+                    sectionIndex={idx}
+                    totalSections={2}
+                    config={config}
+                    configOpen={configOpen}
+                    onOpenConfig={() => {
+                      setConfigOpen(true);
+                      setTempConfig(config);
+                      setFocusedIndex(0);
+                    }}
+                  />
+                </View>
+              ))}
+            </View>
+          ) : sections.length === 3 ? (
+            <View style={styles.rowLayout}>
+              {sections.map((sec, idx) => (
+                <View
+                  key={sec.id || idx}
+                  style={[
+                    styles.flexCell,
+                    { borderRightWidth: idx < 2 ? 2 : 0, borderColor: '#3b82f6' },
+                  ]}
+                >
+                  <SectionPlayer
+                    section={sec}
+                    sectionIndex={idx}
+                    totalSections={3}
+                    config={config}
+                    configOpen={configOpen}
+                    onOpenConfig={() => {
+                      setConfigOpen(true);
+                      setTempConfig(config);
+                      setFocusedIndex(0);
+                    }}
+                  />
+                </View>
+              ))}
+            </View>
+          ) : (
+            // 4 or more sections: 2x2 Grid Layout
+            <View style={styles.columnLayout}>
+              {/* Row 1: Section 1 & Section 2 */}
+              <View style={styles.rowLayout}>
+                {sections.slice(0, 2).map((sec, idx) => (
+                  <View
+                    key={sec.id || idx}
+                    style={[
+                      styles.flexCell,
+                      { borderRightWidth: idx === 0 ? 2 : 0, borderBottomWidth: 2, borderColor: '#3b82f6' },
+                    ]}
+                  >
+                    <SectionPlayer
+                      section={sec}
+                      sectionIndex={idx}
+                      totalSections={sections.length}
+                      config={config}
+                      configOpen={configOpen}
+                      onOpenConfig={() => {
+                        setConfigOpen(true);
+                        setTempConfig(config);
+                        setFocusedIndex(0);
+                      }}
+                    />
+                  </View>
+                ))}
+              </View>
+
+              {/* Row 2: Section 3 & Section 4 */}
+              <View style={styles.rowLayout}>
+                {sections.slice(2, 4).map((sec, idx) => (
+                  <View
+                    key={sec.id || (idx + 2)}
+                    style={[
+                      styles.flexCell,
+                      { borderRightWidth: idx === 0 ? 2 : 0, borderColor: '#3b82f6' },
+                    ]}
+                  >
+                    <SectionPlayer
+                      section={sec}
+                      sectionIndex={idx + 2}
+                      totalSections={sections.length}
+                      config={config}
+                      configOpen={configOpen}
+                      onOpenConfig={() => {
+                        setConfigOpen(true);
+                        setTempConfig(config);
+                        setFocusedIndex(0);
+                      }}
+                    />
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Top Ticker - Overlay on top of media */}
+      {config.tickerPosition === 'top' && !!config.tickerText && (
+        <View style={[styles.tickerBar, config.tickerBgColor !== 'transparent' && { backgroundColor: config.tickerBgColor }, styles.tickerBarTop]}>
+          <Animated.View 
+            style={[styles.tickerScrollContainer, { transform: [{ translateX: scrollX }] }]}
+            onLayout={(e) => {
+              tickerWidth.current = e.nativeEvent.layout.width;
             }}
           >
-            {currentMedia.type === 'video' ? (
-              <Video
-                source={{ uri: `file://${currentMedia.path}` }}
-                style={styles.fullscreenMedia}
-                resizeMode="stretch"
-                repeat={mediaFiles.length === 1}
-                paused={configOpen}
-                onEnd={playNext}
-                onError={handleMediaError}
-                progressUpdateInterval={1000}
-                playInBackground={false}
-                playWhenInactive={false}
-                controls={false}
-                fullscreen={false}
-                poster=""
-                posterResizeMode="stretch"
-                // Optimized for local file playback
-                bufferConfig={{
-                  minBufferMs: 5000,
-                  maxBufferMs: 30000,
-                  bufferForPlaybackMs: 1500,
-                  bufferForPlaybackAfterRebufferMs: 3000,
-                }}
-                preferredForwardBufferDuration={15}
-                onLoad={(data) => {
-                  setErrorCount(0);
-                }}
-              />
-            ) : (
-              <Image
-                source={{ uri: `file://${currentMedia.path}` }}
-                style={styles.fullscreenMedia}
-                resizeMode="stretch"
-                onError={handleMediaError}
-                fadeDuration={0}
-              />
-            )}
-          </Pressable>
+            <Animated.Text
+              style={[styles.tickerText, { color: config.tickerTextColor, fontSize: config.tickerFontSize }]}
+              onLayout={(e) => {
+                tickerWidth.current = e.nativeEvent.layout.width;
+              }}
+            >
+              {config.tickerText}
+            </Animated.Text>
+          </Animated.View>
+        </View>
+      )}
 
-          {/* Top Ticker - Overlay on top of media */}
-          {(() => {
-            console.log('Ticker check - position:', config.tickerPosition, 'text:', config.tickerText);
-            return config.tickerPosition === 'top' && config.tickerText;
-          })() && (
-            <View style={[styles.tickerBar, config.tickerBgColor !== 'transparent' && { backgroundColor: config.tickerBgColor }, styles.tickerBarTop]}>
-              <Animated.View 
-                style={[styles.tickerScrollContainer, { transform: [{ translateX: scrollX }] }]}
-                onLayout={(e) => {
-                  tickerWidth.current = e.nativeEvent.layout.width;
-                }}
-              >
-                <Animated.Text
-                  style={[styles.tickerText, { color: config.tickerTextColor, fontSize: config.tickerFontSize }]}
-                  onLayout={(e) => {
-                    tickerWidth.current = e.nativeEvent.layout.width;
-                  }}
-                >
-                  {config.tickerText}
-                </Animated.Text>
-              </Animated.View>
-            </View>
-          )}
-
-          {/* Bottom Ticker - Overlay on top of media */}
-          {(() => {
-            console.log('Bottom ticker check - position:', config.tickerPosition, 'text:', config.tickerText);
-            return config.tickerPosition === 'bottom' && config.tickerText;
-          })() && (
-            <View style={[styles.tickerBar, config.tickerBgColor !== 'transparent' && { backgroundColor: config.tickerBgColor }, styles.tickerBarBottom]}>
-              <Animated.View 
-                style={[styles.tickerScrollContainer, { transform: [{ translateX: scrollX }] }]}
-                onLayout={(e) => {
-                  tickerWidth.current = e.nativeEvent.layout.width;
-                }}
-              >
-                <Animated.Text
-                  style={[styles.tickerText, { color: config.tickerTextColor, fontSize: config.tickerFontSize }]}
-                  onLayout={(e) => {
-                    tickerWidth.current = e.nativeEvent.layout.width;
-                  }}
-                >
-                  {config.tickerText}
-                </Animated.Text>
-              </Animated.View>
-            </View>
-          )}
+      {/* Bottom Ticker - Overlay on top of media */}
+      {config.tickerPosition === 'bottom' && !!config.tickerText && (
+        <View style={[styles.tickerBar, config.tickerBgColor !== 'transparent' && { backgroundColor: config.tickerBgColor }, styles.tickerBarBottom]}>
+          <Animated.View 
+            style={[styles.tickerScrollContainer, { transform: [{ translateX: scrollX }] }]}
+            onLayout={(e) => {
+              tickerWidth.current = e.nativeEvent.layout.width;
+            }}
+          >
+            <Animated.Text
+              style={[styles.tickerText, { color: config.tickerTextColor, fontSize: config.tickerFontSize }]}
+              onLayout={(e) => {
+                tickerWidth.current = e.nativeEvent.layout.width;
+              }}
+            >
+              {config.tickerText}
+            </Animated.Text>
+          </Animated.View>
         </View>
       )}
 
@@ -1162,15 +1445,39 @@ export default function App() {
                       pressed && styles.btnPressed,
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.choiceText,
-                        !tempConfig.usePendrive && styles.choiceTextActive,
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* Screen Orientation Option */}
+              <View style={styles.settingSectionSingle}>
+                <Text style={styles.sectionTitle}>Screen Orientation:</Text>
+                <View style={styles.singleColumn}>
+                  {ORIENTATION_OPTIONS.map((opt) => (
+                    <Pressable
+                      key={opt.value}
+                      id={`orient-${opt.value}`}
+                      focusable={true}
+                      onFocus={() => setFocusedId(`orient-${opt.value}`)}
+                      onBlur={() => setFocusedId('')}
+                      onPress={() => setTempConfig({ ...tempConfig, orientation: opt.value as any })}
+                      style={({ pressed, focused }: any) => [
+                        styles.choiceBtnSingle,
+                        (tempConfig.orientation || 'horizontal') === opt.value && styles.choiceActive,
+                        (focused || focusedId === `orient-${opt.value}`) && styles.btnFocused,
+                        pressed && styles.btnPressed,
                       ]}
                     >
-                      OFF
-                    </Text>
-                  </Pressable>
+                      <Text
+                        style={[
+                          styles.choiceText,
+                          (tempConfig.orientation || 'horizontal') === opt.value && styles.choiceTextActive,
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                    </Pressable>
+                  ))}
                 </View>
               </View>
 
@@ -1220,6 +1527,7 @@ export default function App() {
             </ScrollView>
           </View>
       )}
+    </View>
     </View>
   );
 }
@@ -1384,10 +1692,68 @@ const styles = StyleSheet.create({
   },
   viewerContainer: {
     flex: 1,
+    width: '100%',
+    height: '100%',
     backgroundColor: '#000',
+  },
+  splitScreenContainer: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#000',
+  },
+  fullCell: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  rowLayout: {
+    flex: 1,
+    flexDirection: 'row',
+    width: '100%',
+    height: '100%',
+  },
+  columnLayout: {
+    flex: 1,
+    flexDirection: 'column',
+    width: '100%',
+    height: '100%',
+  },
+  flexCell: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#000',
+    overflow: 'hidden',
+  },
+  emptySectionContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  emptySectionText: {
+    color: '#64748b',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  loadingFrameContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#090d16',
+  },
+  loadingFrameText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    marginTop: 8,
   },
   mediaWrapper: {
     flex: 1,
+    width: '100%',
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
   },
