@@ -87,6 +87,7 @@ public class EmbeddedCmsServer extends NanoHTTPD {
             defaultConfig.put("orientation", "horizontal");
             defaultConfig.put("layoutMode", "auto");
             defaultConfig.put("sectionRatio", "50_50");
+            defaultConfig.put("showQrCode", true);
         } catch (Exception ignored) {}
         return defaultConfig;
     }
@@ -589,6 +590,13 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 "              <option value=\"true\">ON (USB Pendrive Storage)</option>\n" +
                 "            </select>\n" +
                 "          </div>\n" +
+                "          <div class=\"form-group\">\n" +
+                "            <label class=\"form-label\">Show QR Code & TV IP on Screen</label>\n" +
+                "            <select id=\"showQrCode\">\n" +
+                "              <option value=\"true\">SHOW (Display QR & TV IP Badge)</option>\n" +
+                "              <option value=\"false\">HIDE (Hide QR Badge)</option>\n" +
+                "            </select>\n" +
+                "          </div>\n" +
                 "          <div class=\"full-width\">\n" +
                 "            <button type=\"submit\" class=\"btn-primary\">💾 Save Settings & Update TV</button>\n" +
                 "            <div id=\"saveSuccessMsg\" style=\"display:none; margin-top:12px; padding:12px 16px; background:rgba(34,197,94,0.15); border:1px solid #22c55e; color:#4ade80; border-radius:8px; font-weight:700; text-align:center; font-size:14px;\">✅ Settings & Layout Ratio updated instantly on TV!</div>\n" +
@@ -735,6 +743,7 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 "      document.getElementById('tickerFontFamily').value = cfg.tickerFontFamily || 'sans-serif';\n" +
                 "      document.getElementById('resizeMode').value = cfg.resizeMode || 'stretch';\n" +
                 "      document.getElementById('usePendrive').value = cfg.usePendrive ? 'true' : 'false';\n" +
+                "      document.getElementById('showQrCode').value = cfg.showQrCode !== false ? 'true' : 'false';\n" +
                 "      const layout = cfg.layoutMode || 'auto';\n" +
                 "      document.getElementById('layoutMode').value = layout;\n" +
                 "      document.querySelectorAll('.layout-card').forEach(c => {\n" +
@@ -759,6 +768,7 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 "        tickerFontFamily: document.getElementById('tickerFontFamily').value,\n" +
                 "        resizeMode: document.getElementById('resizeMode').value,\n" +
                 "        usePendrive: document.getElementById('usePendrive').value === 'true',\n" +
+                "        showQrCode: document.getElementById('showQrCode').value === 'true',\n" +
                 "        layoutMode: document.getElementById('layoutMode').value,\n" +
                 "        sectionRatio: document.getElementById('sectionRatio').value\n" +
                 "      };\n" +

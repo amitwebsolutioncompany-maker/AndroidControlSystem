@@ -262,6 +262,7 @@ interface AppConfig {
   orientation?: 'horizontal' | 'reverse-horizontal' | 'vertical' | 'reverse-vertical';
   layoutMode?: 'auto' | 'stack_vertical' | 'stack_horizontal' | 'top2_bottom1' | 'top1_bottom2' | 'grid_2x2';
   sectionRatio?: '50_50' | '60_40' | '70_30' | '40_60' | '30_70';
+  showQrCode?: boolean;
 }
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -278,6 +279,7 @@ const DEFAULT_CONFIG: AppConfig = {
   orientation: 'horizontal',
   layoutMode: 'auto',
   sectionRatio: '50_50',
+  showQrCode: true,
 };
 
 const getRatioFlex = (ratio?: string, isFirst?: boolean) => {
@@ -459,7 +461,18 @@ export default function App() {
     return () => {
       marqueeLoop.stop();
     };
-  }, [config.tickerText, config.tickerFontSize, configOpen, scrollX, screenWidthVal, tickerTextWidth]);
+  }, [
+    config.tickerText,
+    config.tickerFontSize,
+    config.tickerPosition,
+    config.layoutMode,
+    config.sectionRatio,
+    config.orientation,
+    configOpen,
+    scrollX,
+    screenWidthVal,
+    tickerTextWidth,
+  ]);
 
   // Permissions States
   const [hasStorage, setHasStorage] = useState<boolean>(false);
@@ -1556,7 +1569,7 @@ export default function App() {
         )}
 
         {/* Semi-transparent Mini QR Code Overlay Badge with IP:Port Display */}
-        {!!cmsInfo.qrCode && (
+        {!!cmsInfo.qrCode && config.showQrCode !== false && (
           <View
             style={{
               position: 'absolute',
