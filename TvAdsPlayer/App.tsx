@@ -20,6 +20,7 @@ import {
   Linking,
   Dimensions,
   useWindowDimensions,
+  NativeEventEmitter,
   NativeModules as RNNativeModules,
 } from 'react-native';
 import RNFS from 'react-native-fs';
@@ -195,7 +196,7 @@ const SectionPlayer: React.FC<SectionPlayerProps> = ({
   );
 };
 
-const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tiff', '.tif', '.svg', '.ico', '.heic', '.heif', '.jp2', '.j2k', '.wbmp'];
+const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tiff', '.tif', '.svg', '.ico', '.heic', '.heif', '.jp2', '.j2k', '.wbmp', '.jfif', '.pjp', '.pjpeg', '.avif'];
 const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.mkv', '.avi', '.3gp', '.webm', '.flv', '.wmv', '.m4v', '.mpg', '.mpeg', '.ts', '.mts', '.m2ts', '.ogv', '.divx', '.xvid', '.asf', '.rm', '.rmvb', '.vob', '.f4v'];
 const DURATION_OPTIONS = [
   { label: '5 Sec', value: 5000 },
@@ -252,12 +253,15 @@ interface AppConfig {
   tickerText: string;
   tickerTextColor: string;
   tickerBgColor: string;
-  tickerPosition: 'top' | 'bottom';
+  tickerPosition: 'top' | 'middle' | 'bottom';
   tickerFontSize: number;
+  tickerFontFamily?: string;
   usePendrive: boolean;
   resizeMode: 'contain' | 'cover' | 'stretch';
   kioskMode?: boolean;
   orientation?: 'horizontal' | 'reverse-horizontal' | 'vertical' | 'reverse-vertical';
+  layoutMode?: 'auto' | 'stack_vertical' | 'stack_horizontal' | 'top2_bottom1' | 'top1_bottom2' | 'grid_2x2';
+  sectionRatio?: '50_50' | '60_40' | '70_30' | '40_60' | '30_70';
 }
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -267,10 +271,29 @@ const DEFAULT_CONFIG: AppConfig = {
   tickerBgColor: '#000000',
   tickerPosition: 'bottom',
   tickerFontSize: 16,
+  tickerFontFamily: 'sans-serif',
   usePendrive: false,
   resizeMode: 'stretch',
   kioskMode: false,
   orientation: 'horizontal',
+  layoutMode: 'auto',
+  sectionRatio: '50_50',
+};
+
+const getRatioFlex = (ratio?: string, isFirst?: boolean) => {
+  switch (ratio) {
+    case '60_40':
+      return isFirst ? 0.6 : 0.4;
+    case '70_30':
+      return isFirst ? 0.7 : 0.3;
+    case '40_60':
+      return isFirst ? 0.4 : 0.6;
+    case '30_70':
+      return isFirst ? 0.3 : 0.7;
+    case '50_50':
+    default:
+      return 1;
+  }
 };
 
 export default function App() {
@@ -400,26 +423,43 @@ export default function App() {
     }
   }, [licensed, ready]);
 
-  // Ticker animation effect
+  const windowDimensions = useWindowDimensions();
+  const screenWidthVal = windowDimensions.width || Dimensions.get('window').width || 1280;
+
+  const [tickerTextWidth, setTickerTextWidth] = useState<number>(0);
+
+  // Ticker marquee animation effect - continuous non-stop loop right to left with ZERO blank gap
   useEffect(() => {
-    if (config.tickerText && !configOpen) {
-      const animate = () => {
-        Animated.timing(scrollX, {
-          toValue: -tickerWidth.current,
-          duration: 5000, // 5 seconds for full scroll (faster speed)
-          easing: Easing.linear,
-          useNativeDriver: true,
-        }).start(() => {
-          scrollX.setValue(0);
-          animate();
-        });
-      };
-      animate();
+    if (!config.tickerText || configOpen) {
+      scrollX.setValue(0);
+      return;
     }
+
+    const fontSz = config.tickerFontSize || 16;
+    const exactW = tickerTextWidth > 0 ? tickerTextWidth : Math.max(20, config.tickerText.length * fontSz * 0.55);
+    const startX = screenWidthVal;
+    const endX = -exactW;
+    const totalDistance = startX - endX;
+    const speedPxPerMs = 0.12; // Responsive smooth marquee speed
+    const duration = Math.max(3000, Math.round(totalDistance / speedPxPerMs));
+
+    scrollX.setValue(startX);
+
+    const marqueeLoop = Animated.loop(
+      Animated.timing(scrollX, {
+        toValue: endX,
+        duration: duration,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    );
+
+    marqueeLoop.start();
+
     return () => {
-      scrollX.stopAnimation();
+      marqueeLoop.stop();
     };
-  }, [config.tickerText, configOpen, scrollX]);
+  }, [config.tickerText, config.tickerFontSize, configOpen, scrollX, screenWidthVal, tickerTextWidth]);
 
   // Permissions States
   const [hasStorage, setHasStorage] = useState<boolean>(false);
@@ -435,6 +475,21 @@ export default function App() {
 
   // Active resolved ads directory path (internal or USB)
   const [activeAdsDir, setActiveAdsDir] = useState<string>(ADS_DIR);
+  const [cmsInfo, setCmsInfo] = useState<{ url: string; qrCode: string }>({ url: '', qrCode: '' });
+
+  // Start Embedded HTTP CMS Web Server on Port 9090
+  useEffect(() => {
+    if ((RNNativeModules as any)?.CmsServerModule?.startServer) {
+      (RNNativeModules as any).CmsServerModule.startServer()
+        .then((res: { url: string; qrCode: string }) => {
+          console.log('Embedded CMS Web Server running at:', res?.url);
+          if (res) {
+            setCmsInfo(res);
+          }
+        })
+        .catch((err: any) => console.warn('Failed to start CMS Server:', err));
+    }
+  }, []);
 
   // Load config from AsyncStorage
   const loadConfig = useCallback(async () => {
@@ -669,6 +724,38 @@ export default function App() {
       setLoading(false);
     }
   }, [config.usePendrive, resolveAdsDirectory]);
+
+  // Listen for real-time web CMS events (config updates and media uploads)
+  useEffect(() => {
+    if (!(RNNativeModules as any)?.CmsServerModule) return;
+    const eventEmitter = new NativeEventEmitter((RNNativeModules as any).CmsServerModule);
+    const listener = eventEmitter.addListener('embeddedCmsEvent', (event: { type: string; payload: string }) => {
+      if (event.type === 'config-updated') {
+        try {
+          const parsed = JSON.parse(event.payload);
+          const merged = { ...DEFAULT_CONFIG, ...parsed };
+          setConfig(merged);
+          setTempConfig(merged);
+          setResizeMode(merged.resizeMode || 'stretch');
+          setCustomTextColor(merged.tickerTextColor || '#FFFFFF');
+          setCustomBgColor(merged.tickerBgColor || '#000000');
+          if (merged.orientation) {
+            (RNNativeModules as any)?.DeviceIdModule?.applyOrientation?.(merged.orientation);
+          }
+          AsyncStorage.setItem('tvads_config', JSON.stringify(merged));
+          scanFolder();
+        } catch (e) {
+          console.warn('Error handling config-updated event:', e);
+        }
+      } else if (event.type === 'media-updated') {
+        console.log('Media uploaded or deleted via Web CMS, rescanning folders...');
+        scanFolder();
+      }
+    });
+    return () => {
+      listener.remove();
+    };
+  }, [scanFolder]);
 
   // Helper for responsive split-screen layouts
   const getSectionStyle = (index: number, count: number) => {
@@ -938,28 +1025,38 @@ export default function App() {
       <View style={styles.darkContainer}>
         <StatusBar hidden />
         <View style={styles.instructionCard}>
-          <Text style={styles.emojiTitle}>📺</Text>
-          <Text style={styles.titleText}>TV Ads Player</Text>
-          <Text style={styles.subtitleText}>No Media Files Found</Text>
-          
+          <Text style={styles.emojiTitle}>📺 Digital Signage Player</Text>
+          <Text style={styles.subtitleText}>No Media Files Found in TV Storage</Text>
+
           <View style={styles.pathBox}>
-            <Text style={styles.pathLabel}>Directory to place files:</Text>
+            <Text style={styles.pathLabel}>📁 Media Folder Location on TV:</Text>
             <Text style={styles.pathText}>{activeAdsDir}</Text>
           </View>
-          
-          <Text style={styles.infoText}>
-            Please copy images (.jpg, .jpeg, .png, .webp, .gif, .bmp, .tiff, .svg, .heic, etc.) or videos (.mp4, .mkv, .mov, .avi, .webm, .flv, .wmv, .m4v, .mpeg, .ts, etc.) into 'section1', 'section2', etc. inside the 'nvsign' folder in your internal main storage or USB pendrive and try again.
-          </Text>
+
+          <View style={{ width: '100%', marginVertical: 12, paddingHorizontal: 8 }}>
+            <Text style={{ color: '#38bdf8', fontWeight: 'bold', fontSize: 13, marginBottom: 4 }}>
+              💡 Easy Ways to Add Media Content:
+            </Text>
+            <Text style={{ color: '#cbd5e1', fontSize: 12, lineHeight: 18 }}>
+              1. Open CMS Web Portal on Phone/PC connected to same WiFi:{'\n'}
+                 👉 <Text style={{ color: '#4ade80', fontWeight: 'bold' }}>{cmsInfo.url || 'http://<TV_IP>:9090'}</Text>{'\n'}
+              2. Or insert USB Pendrive with videos/images into TV.{'\n'}
+              3. Or place files into 'section1', 'section2', etc. inside '{activeAdsDir}'.
+            </Text>
+          </View>
 
           <Pressable
+            focusable
+            hasTVPreferredFocus
             onPress={scanFolder}
             style={({ pressed, focused }: any) => [
               styles.btn,
               focused && styles.btnFocused,
               pressed && styles.btnPressed,
+              { marginTop: 8 }
             ]}
           >
-            <Text style={styles.btnText}>Reload / Scan Folder</Text>
+            <Text style={styles.btnText}>🔄 Refresh / Scan Media Files</Text>
           </Pressable>
         </View>
       </View>
@@ -1012,92 +1109,71 @@ export default function App() {
     >
       <View style={styles.viewerContainer}>
         <StatusBar hidden />
-      
-      {/* Dynamic Split Screen View for Section 1, Section 2, Section 3, Section 4 */}
-      {sections.length > 0 && (
-        <View style={styles.splitScreenContainer}>
-          {sections.length <= 1 ? (
-            <View style={styles.fullCell}>
-              <SectionPlayer
-                section={sections[0]}
-                sectionIndex={0}
-                totalSections={1}
-                config={config}
-                configOpen={configOpen}
-                onOpenConfig={() => {
-                  setConfigOpen(true);
-                  setTempConfig(config);
-                  setFocusedIndex(0);
+
+        {/* Top Ticker (Flex layout flow above media content so no content overlap occurs) */}
+        {!!config.tickerText && config.tickerPosition === 'top' && (
+          <View
+            style={[
+              styles.tickerBar,
+              {
+                height: (config.tickerFontSize || 16) + 16,
+                backgroundColor: config.tickerBgColor !== 'transparent' ? config.tickerBgColor : '#000000',
+              },
+            ]}
+          >
+            <Animated.View
+              style={[styles.tickerScrollContainer, { transform: [{ translateX: scrollX }] }]}
+            >
+              <Animated.Text
+                numberOfLines={1}
+                style={[
+                  styles.tickerText,
+                  {
+                    color: config.tickerTextColor,
+                    fontSize: config.tickerFontSize,
+                    fontFamily: config.tickerFontFamily || 'sans-serif',
+                  },
+                ]}
+                onLayout={(e) => {
+                  const w = e.nativeEvent.layout.width;
+                  if (w > 0 && Math.abs(w - tickerTextWidth) > 5) {
+                    tickerWidth.current = w;
+                    setTickerTextWidth(w);
+                  }
                 }}
-              />
-            </View>
-          ) : sections.length === 2 ? (
-            <View style={styles.rowLayout}>
-              {sections.map((sec, idx) => (
-                <View
-                  key={sec.id || idx}
-                  style={[
-                    styles.flexCell,
-                    { borderRightWidth: idx === 0 ? 2 : 0, borderColor: '#3b82f6' },
-                  ]}
-                >
-                  <SectionPlayer
-                    section={sec}
-                    sectionIndex={idx}
-                    totalSections={2}
-                    config={config}
-                    configOpen={configOpen}
-                    onOpenConfig={() => {
-                      setConfigOpen(true);
-                      setTempConfig(config);
-                      setFocusedIndex(0);
-                    }}
-                  />
-                </View>
-              ))}
-            </View>
-          ) : sections.length === 3 ? (
-            <View style={styles.rowLayout}>
-              {sections.map((sec, idx) => (
-                <View
-                  key={sec.id || idx}
-                  style={[
-                    styles.flexCell,
-                    { borderRightWidth: idx < 2 ? 2 : 0, borderColor: '#3b82f6' },
-                  ]}
-                >
-                  <SectionPlayer
-                    section={sec}
-                    sectionIndex={idx}
-                    totalSections={3}
-                    config={config}
-                    configOpen={configOpen}
-                    onOpenConfig={() => {
-                      setConfigOpen(true);
-                      setTempConfig(config);
-                      setFocusedIndex(0);
-                    }}
-                  />
-                </View>
-              ))}
-            </View>
-          ) : (
-            // 4 or more sections: 2x2 Grid Layout
-            <View style={styles.columnLayout}>
-              {/* Row 1: Section 1 & Section 2 */}
-              <View style={styles.rowLayout}>
-                {sections.slice(0, 2).map((sec, idx) => (
-                  <View
-                    key={sec.id || idx}
-                    style={[
-                      styles.flexCell,
-                      { borderRightWidth: idx === 0 ? 2 : 0, borderBottomWidth: 2, borderColor: '#3b82f6' },
-                    ]}
-                  >
+              >
+                {config.tickerText}
+              </Animated.Text>
+            </Animated.View>
+          </View>
+        )}
+
+        {/* Dynamic Split Screen View for Sections */}
+        {sections.length > 0 && (
+          <View style={styles.splitScreenContainer}>
+            {sections.length === 1 ? (
+              <View style={styles.fullCell}>
+                <SectionPlayer
+                  section={sections[0]}
+                  sectionIndex={0}
+                  totalSections={1}
+                  config={config}
+                  configOpen={configOpen}
+                  onOpenConfig={() => {
+                    setConfigOpen(true);
+                    setTempConfig(config);
+                    setFocusedIndex(0);
+                  }}
+                />
+              </View>
+            ) : sections.length === 2 ? (
+              config.layoutMode === 'stack_vertical' ? (
+                <View style={styles.columnLayout}>
+                  <View style={[styles.flexCell, { flex: getRatioFlex(config.sectionRatio, true), borderBottomWidth: 2, borderColor: '#3b82f6' }]}>
                     <SectionPlayer
-                      section={sec}
-                      sectionIndex={idx}
-                      totalSections={sections.length}
+                      section={sections[0]}
+                      sectionIndex={0}
+                      totalSections={2}
                       config={config}
                       configOpen={configOpen}
                       onOpenConfig={() => {
@@ -1107,23 +1183,11 @@ export default function App() {
                       }}
                     />
                   </View>
-                ))}
-              </View>
-
-              {/* Row 2: Section 3 & Section 4 */}
-              <View style={styles.rowLayout}>
-                {sections.slice(2, 4).map((sec, idx) => (
-                  <View
-                    key={sec.id || (idx + 2)}
-                    style={[
-                      styles.flexCell,
-                      { borderRightWidth: idx === 0 ? 2 : 0, borderColor: '#3b82f6' },
-                    ]}
-                  >
+                  <View style={[styles.flexCell, { flex: getRatioFlex(config.sectionRatio, false) }]}>
                     <SectionPlayer
-                      section={sec}
-                      sectionIndex={idx + 2}
-                      totalSections={sections.length}
+                      section={sections[1]}
+                      sectionIndex={1}
+                      totalSections={2}
                       config={config}
                       configOpen={configOpen}
                       onOpenConfig={() => {
@@ -1133,54 +1197,404 @@ export default function App() {
                       }}
                     />
                   </View>
-                ))}
-              </View>
-            </View>
-          )}
-        </View>
-      )}
+                </View>
+              ) : (
+                <View style={styles.rowLayout}>
+                  <View style={[styles.flexCell, { flex: getRatioFlex(config.sectionRatio, true), borderRightWidth: 2, borderColor: '#3b82f6' }]}>
+                    <SectionPlayer
+                      section={sections[0]}
+                      sectionIndex={0}
+                      totalSections={2}
+                      config={config}
+                      configOpen={configOpen}
+                      onOpenConfig={() => {
+                        setConfigOpen(true);
+                        setTempConfig(config);
+                        setFocusedIndex(0);
+                      }}
+                    />
+                  </View>
+                  <View style={[styles.flexCell, { flex: getRatioFlex(config.sectionRatio, false) }]}>
+                    <SectionPlayer
+                      section={sections[1]}
+                      sectionIndex={1}
+                      totalSections={2}
+                      config={config}
+                      configOpen={configOpen}
+                      onOpenConfig={() => {
+                        setConfigOpen(true);
+                        setTempConfig(config);
+                        setFocusedIndex(0);
+                      }}
+                    />
+                  </View>
+                </View>
+              )
+            ) : sections.length === 3 ? (
+              config.layoutMode === 'stack_vertical' ? (
+                <View style={styles.columnLayout}>
+                  {sections.map((sec, idx) => (
+                    <View
+                      key={sec.id || idx}
+                      style={[
+                        styles.flexCell,
+                        { borderBottomWidth: idx < 2 ? 2 : 0, borderColor: '#3b82f6' },
+                      ]}
+                    >
+                      <SectionPlayer
+                        section={sec}
+                        sectionIndex={idx}
+                        totalSections={3}
+                        config={config}
+                        configOpen={configOpen}
+                        onOpenConfig={() => {
+                          setConfigOpen(true);
+                          setTempConfig(config);
+                          setFocusedIndex(0);
+                        }}
+                      />
+                    </View>
+                  ))}
+                </View>
+              ) : config.layoutMode === 'stack_horizontal' ? (
+                <View style={styles.rowLayout}>
+                  {sections.map((sec, idx) => (
+                    <View
+                      key={sec.id || idx}
+                      style={[
+                        styles.flexCell,
+                        { borderRightWidth: idx < 2 ? 2 : 0, borderColor: '#3b82f6' },
+                      ]}
+                    >
+                      <SectionPlayer
+                        section={sec}
+                        sectionIndex={idx}
+                        totalSections={3}
+                        config={config}
+                        configOpen={configOpen}
+                        onOpenConfig={() => {
+                          setConfigOpen(true);
+                          setTempConfig(config);
+                          setFocusedIndex(0);
+                        }}
+                      />
+                    </View>
+                  ))}
+                </View>
+              ) : config.layoutMode === 'top1_bottom2' ? (
+                <View style={styles.columnLayout}>
+                  <View style={[styles.flexCell, { flex: getRatioFlex(config.sectionRatio, true), width: '100%', borderBottomWidth: 2, borderColor: '#3b82f6' }]}>
+                    <SectionPlayer
+                      section={sections[0]}
+                      sectionIndex={0}
+                      totalSections={3}
+                      config={config}
+                      configOpen={configOpen}
+                      onOpenConfig={() => {
+                        setConfigOpen(true);
+                        setTempConfig(config);
+                        setFocusedIndex(0);
+                      }}
+                    />
+                  </View>
+                  <View style={[styles.rowLayout, { flex: getRatioFlex(config.sectionRatio, false) }]}>
+                    {sections.slice(1, 3).map((sec, idx) => (
+                      <View
+                        key={sec.id || (idx + 1)}
+                        style={[
+                          styles.flexCell,
+                          { borderRightWidth: idx === 0 ? 2 : 0, borderColor: '#3b82f6' },
+                        ]}
+                      >
+                        <SectionPlayer
+                          section={sec}
+                          sectionIndex={idx + 1}
+                          totalSections={3}
+                          config={config}
+                          configOpen={configOpen}
+                          onOpenConfig={() => {
+                            setConfigOpen(true);
+                            setTempConfig(config);
+                            setFocusedIndex(0);
+                          }}
+                        />
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ) : (
+                /* top2_bottom1 or auto */
+                <View style={styles.columnLayout}>
+                  <View style={[styles.rowLayout, { flex: getRatioFlex(config.sectionRatio, true), borderBottomWidth: 2, borderColor: '#3b82f6' }]}>
+                    {sections.slice(0, 2).map((sec, idx) => (
+                      <View
+                        key={sec.id || idx}
+                        style={[
+                          styles.flexCell,
+                          { borderRightWidth: idx === 0 ? 2 : 0, borderColor: '#3b82f6' },
+                        ]}
+                      >
+                        <SectionPlayer
+                          section={sec}
+                          sectionIndex={idx}
+                          totalSections={3}
+                          config={config}
+                          configOpen={configOpen}
+                          onOpenConfig={() => {
+                            setConfigOpen(true);
+                            setTempConfig(config);
+                            setFocusedIndex(0);
+                          }}
+                        />
+                      </View>
+                    ))}
+                  </View>
+                  <View style={[styles.flexCell, { flex: getRatioFlex(config.sectionRatio, false), width: '100%' }]}>
+                    <SectionPlayer
+                      section={sections[2] || sections[0]}
+                      sectionIndex={2}
+                      totalSections={3}
+                      config={config}
+                      configOpen={configOpen}
+                      onOpenConfig={() => {
+                        setConfigOpen(true);
+                        setTempConfig(config);
+                        setFocusedIndex(0);
+                      }}
+                    />
+                  </View>
+                </View>
+              )
+            ) : (
+              /* 4 or more sections */
+              config.layoutMode === 'stack_vertical' ? (
+                <View style={styles.columnLayout}>
+                  {sections.map((sec, idx) => (
+                    <View
+                      key={sec.id || idx}
+                      style={[
+                        styles.flexCell,
+                        { borderBottomWidth: idx < sections.length - 1 ? 2 : 0, borderColor: '#3b82f6' },
+                      ]}
+                    >
+                      <SectionPlayer
+                        section={sec}
+                        sectionIndex={idx}
+                        totalSections={sections.length}
+                        config={config}
+                        configOpen={configOpen}
+                        onOpenConfig={() => {
+                          setConfigOpen(true);
+                          setTempConfig(config);
+                          setFocusedIndex(0);
+                        }}
+                      />
+                    </View>
+                  ))}
+                </View>
+              ) : config.layoutMode === 'stack_horizontal' ? (
+                <View style={styles.rowLayout}>
+                  {sections.map((sec, idx) => (
+                    <View
+                      key={sec.id || idx}
+                      style={[
+                        styles.flexCell,
+                        { borderRightWidth: idx < sections.length - 1 ? 2 : 0, borderColor: '#3b82f6' },
+                      ]}
+                    >
+                      <SectionPlayer
+                        section={sec}
+                        sectionIndex={idx}
+                        totalSections={sections.length}
+                        config={config}
+                        configOpen={configOpen}
+                        onOpenConfig={() => {
+                          setConfigOpen(true);
+                          setTempConfig(config);
+                          setFocusedIndex(0);
+                        }}
+                      />
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                /* 2x2 Grid Layout with Ratios */
+                <View style={styles.columnLayout}>
+                  <View style={[styles.rowLayout, { flex: getRatioFlex(config.sectionRatio, true), borderBottomWidth: 2, borderColor: '#3b82f6' }]}>
+                    {sections.slice(0, 2).map((sec, idx) => (
+                      <View
+                        key={sec.id || idx}
+                        style={[
+                          styles.flexCell,
+                          { borderRightWidth: idx === 0 ? 2 : 0, borderColor: '#3b82f6' },
+                        ]}
+                      >
+                        <SectionPlayer
+                          section={sec}
+                          sectionIndex={idx}
+                          totalSections={sections.length}
+                          config={config}
+                          configOpen={configOpen}
+                          onOpenConfig={() => {
+                            setConfigOpen(true);
+                            setTempConfig(config);
+                            setFocusedIndex(0);
+                          }}
+                        />
+                      </View>
+                    ))}
+                  </View>
+                  <View style={[styles.rowLayout, { flex: getRatioFlex(config.sectionRatio, false) }]}>
+                    {sections.slice(2, 4).map((sec, idx) => (
+                      <View
+                        key={sec.id || (idx + 2)}
+                        style={[
+                          styles.flexCell,
+                          { borderRightWidth: idx === 0 ? 2 : 0, borderColor: '#3b82f6' },
+                        ]}
+                      >
+                        <SectionPlayer
+                          section={sec}
+                          sectionIndex={idx + 2}
+                          totalSections={sections.length}
+                          config={config}
+                          configOpen={configOpen}
+                          onOpenConfig={() => {
+                            setConfigOpen(true);
+                            setTempConfig(config);
+                            setFocusedIndex(0);
+                          }}
+                        />
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )
+            )}
+          </View>
+        )}
 
-      {/* Top Ticker - Overlay on top of media */}
-      {config.tickerPosition === 'top' && !!config.tickerText && (
-        <View style={[styles.tickerBar, config.tickerBgColor !== 'transparent' && { backgroundColor: config.tickerBgColor }, styles.tickerBarTop]}>
-          <Animated.View 
-            style={[styles.tickerScrollContainer, { transform: [{ translateX: scrollX }] }]}
-            onLayout={(e) => {
-              tickerWidth.current = e.nativeEvent.layout.width;
+        {/* Bottom Ticker (Flex layout flow below media content so no content overlap occurs) */}
+        {!!config.tickerText && config.tickerPosition === 'bottom' && (
+          <View
+            style={[
+              styles.tickerBar,
+              {
+                height: (config.tickerFontSize || 16) + 16,
+                backgroundColor: config.tickerBgColor !== 'transparent' ? config.tickerBgColor : '#000000',
+              },
+            ]}
+          >
+            <Animated.View
+              style={[styles.tickerScrollContainer, { transform: [{ translateX: scrollX }] }]}
+            >
+              <Animated.Text
+                numberOfLines={1}
+                style={[
+                  styles.tickerText,
+                  {
+                    color: config.tickerTextColor,
+                    fontSize: config.tickerFontSize,
+                    fontFamily: config.tickerFontFamily || 'sans-serif',
+                  },
+                ]}
+                onLayout={(e) => {
+                  const w = e.nativeEvent.layout.width;
+                  if (w > 0 && Math.abs(w - tickerTextWidth) > 5) {
+                    tickerWidth.current = w;
+                    setTickerTextWidth(w);
+                  }
+                }}
+              >
+                {config.tickerText}
+              </Animated.Text>
+            </Animated.View>
+          </View>
+        )}
+
+        {/* Middle Ticker Overlay (Center Screen) */}
+        {!!config.tickerText && config.tickerPosition === 'middle' && (
+          <View
+            style={[
+              styles.tickerBar,
+              {
+                position: 'absolute',
+                top: '50%',
+                transform: [{ translateY: -((config.tickerFontSize || 16) + 16) / 2 }],
+                width: '100%',
+                height: (config.tickerFontSize || 16) + 16,
+                backgroundColor: config.tickerBgColor !== 'transparent' ? config.tickerBgColor : 'rgba(0,0,0,0.85)',
+                zIndex: 9998,
+              },
+            ]}
+          >
+            <Animated.View
+              style={[styles.tickerScrollContainer, { transform: [{ translateX: scrollX }] }]}
+            >
+              <Animated.Text
+                numberOfLines={1}
+                style={[
+                  styles.tickerText,
+                  {
+                    color: config.tickerTextColor,
+                    fontSize: config.tickerFontSize,
+                    fontFamily: config.tickerFontFamily || 'sans-serif',
+                  },
+                ]}
+                onLayout={(e) => {
+                  const w = e.nativeEvent.layout.width;
+                  if (w > 0 && Math.abs(w - tickerTextWidth) > 5) {
+                    tickerWidth.current = w;
+                    setTickerTextWidth(w);
+                  }
+                }}
+              >
+                {config.tickerText}
+              </Animated.Text>
+            </Animated.View>
+          </View>
+        )}
+
+        {/* Semi-transparent Mini QR Code Overlay Badge with IP:Port Display */}
+        {!!cmsInfo.qrCode && (
+          <View
+            style={{
+              position: 'absolute',
+              top: config.tickerPosition === 'top' && !!config.tickerText ? 40 : 12,
+              right: 12,
+              backgroundColor: 'rgba(0, 0, 0, 0.75)',
+              padding: 5,
+              borderRadius: 8,
+              zIndex: 9999,
+              alignItems: 'center',
+              width: 65,
+              borderWidth: 1,
+              borderColor: 'rgba(255, 255, 255, 0.25)',
             }}
           >
-            <Animated.Text
-              style={[styles.tickerText, { color: config.tickerTextColor, fontSize: config.tickerFontSize }]}
-              onLayout={(e) => {
-                tickerWidth.current = e.nativeEvent.layout.width;
-              }}
-            >
-              {config.tickerText}
-            </Animated.Text>
-          </Animated.View>
-        </View>
-      )}
-
-      {/* Bottom Ticker - Overlay on top of media */}
-      {config.tickerPosition === 'bottom' && !!config.tickerText && (
-        <View style={[styles.tickerBar, config.tickerBgColor !== 'transparent' && { backgroundColor: config.tickerBgColor }, styles.tickerBarBottom]}>
-          <Animated.View 
-            style={[styles.tickerScrollContainer, { transform: [{ translateX: scrollX }] }]}
-            onLayout={(e) => {
-              tickerWidth.current = e.nativeEvent.layout.width;
-            }}
-          >
-            <Animated.Text
-              style={[styles.tickerText, { color: config.tickerTextColor, fontSize: config.tickerFontSize }]}
-              onLayout={(e) => {
-                tickerWidth.current = e.nativeEvent.layout.width;
-              }}
-            >
-              {config.tickerText}
-            </Animated.Text>
-          </Animated.View>
-        </View>
-      )}
+            <Image
+              source={{ uri: cmsInfo.qrCode }}
+              style={{ width: 55, height: 55, borderRadius: 4 }}
+              resizeMode="contain"
+            />
+            {!!cmsInfo.url && (
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                style={{
+                  color: '#38bdf8',
+                  fontSize: 8.5,
+                  fontWeight: '700',
+                  marginTop: 3,
+                  width: 55,
+                  textAlign: 'center',
+                }}
+              >
+                {cmsInfo.url.replace(/^https?:\/\//i, '')}
+              </Text>
+            )}
+          </View>
+        )}
 
       {/* Config Settings Full Screen Page */}
       {configOpen && (
@@ -1936,30 +2350,26 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   tickerBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    alignItems: 'center',
+    width: '100%',
     justifyContent: 'center',
     overflow: 'hidden',
+    position: 'relative',
     zIndex: 10,
     backgroundColor: 'transparent',
   },
-  tickerBarTop: {
-    top: 0,
-  },
-  tickerBarBottom: {
-    bottom: 0,
-    position: 'absolute',
-  },
+  tickerBarTop: {},
+  tickerBarBottom: {},
   tickerScrollContainer: {
+    position: 'absolute',
+    left: 0,
     flexDirection: 'row',
+    alignItems: 'center',
   },
   tickerText: {
     fontSize: 16,
     fontWeight: '600',
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   configDialog: {
     width: '65%',

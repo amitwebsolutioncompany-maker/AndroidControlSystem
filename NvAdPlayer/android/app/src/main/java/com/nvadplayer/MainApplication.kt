@@ -23,6 +23,7 @@ class MainApplication : Application(), ReactApplication {
           add(SimpleWebViewPackage())
           add(NativeVideoPlayerPackage())
           add(AndroidNativeMediaPlayerPackage())
+          add(CmsServerPackage())
         },
     )
   }

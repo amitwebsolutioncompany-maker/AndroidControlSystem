@@ -131,6 +131,11 @@ dependencies {
     implementation("androidx.media3:media3-common:1.4.1")
     implementation("androidx.media3:media3-datasource:1.4.1")
 
+    // Embedded NanoHTTPD HTTP Web Server (Port 9090)
+    implementation 'org.nanohttpd:nanohttpd:2.3.1'
+    // ZXing for Offline QR Code Generation
+    implementation 'com.google.zxing:core:3.5.3'
+
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
     } else {
