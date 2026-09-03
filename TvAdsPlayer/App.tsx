@@ -22,9 +22,11 @@ import {
   useWindowDimensions,
   NativeEventEmitter,
   NativeModules as RNNativeModules,
+  ViewStyle,
 } from 'react-native';
 import RNFS from 'react-native-fs';
 import Video from 'react-native-video';
+import { WebView } from 'react-native-webview';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   isUsbModuleAvailable,
@@ -263,11 +265,41 @@ interface AppConfig {
   layoutMode?: 'auto' | 'stack_vertical' | 'stack_horizontal' | 'top2_bottom1' | 'top1_bottom2' | 'grid_2x2';
   sectionRatio?: '50_50' | '60_40' | '70_30' | '40_60' | '30_70';
   showQrCode?: boolean;
+  weatherCity?: string;
+  weatherUnit?: string;
+  rssFeedUrl?: string;
+  liveStreamUrl?: string;
+  clockFormat?: string;
+  prayerCity?: string;
+}
+
+interface CustomZone {
+  id: string;
+  name: string;
+  type: 'media' | 'stream' | 'weather' | 'clock' | 'rss' | 'logo';
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  zIndex: number;
+}
+
+interface CustomLayout {
+  enabled: boolean;
+  zones: CustomZone[];
+}
+
+interface EmergencyAlertData {
+  active: boolean;
+  type: string;
+  title: string;
+  message: string;
+  sound: boolean;
 }
 
 const DEFAULT_CONFIG: AppConfig = {
   slideDuration: 5000,
-  tickerText: '',
+  tickerText: 'Thank You for Choosing NextView • Your Trusted Digital Signage Partner • Smart Displays. Professional Solutions. Reliable Support. • +91 92278 96944',
   tickerTextColor: '#FFFFFF',
   tickerBgColor: '#000000',
   tickerPosition: 'bottom',
@@ -280,6 +312,240 @@ const DEFAULT_CONFIG: AppConfig = {
   layoutMode: 'auto',
   sectionRatio: '50_50',
   showQrCode: true,
+  weatherCity: 'Delhi',
+  weatherUnit: 'celsius',
+  clockFormat: '12h',
+  prayerCity: 'Delhi',
+};
+
+const ClockWidget = ({ config }: { config: AppConfig }) => {
+  const [timeStr, setTimeStr] = useState<string>('');
+  const [dateStr, setDateStr] = useState<string>('');
+
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      const is24h = config.clockFormat === '24h';
+      setTimeStr(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: !is24h }));
+      setDateStr(now.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' }));
+    };
+    updateTime();
+    const timer = setInterval(updateTime, 1000);
+    return () => clearInterval(timer);
+  }, [config.clockFormat]);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.92)', padding: 14, justifyContent: 'center', alignItems: 'center', borderRadius: 10, borderWidth: 1, borderColor: '#38bdf8' }}>
+      <Text style={{ color: '#38bdf8', fontSize: 26, fontWeight: '900', letterSpacing: 1 }}>🕒 {timeStr}</Text>
+      <Text style={{ color: '#cbd5e1', fontSize: 12, fontWeight: '600', marginTop: 4 }}>{dateStr}</Text>
+    </View>
+  );
+};
+
+const WeatherWidget = ({ config }: { config: AppConfig }) => {
+  const [temp, setTemp] = useState<string>('30°C');
+  const [condition, setCondition] = useState<string>('Sunny ☀️');
+
+  useEffect(() => {
+    const fetchWeather = async () => {
+      try {
+        const city = config.weatherCity || 'Delhi';
+        const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=28.61&longitude=77.20&current_weather=true`);
+        const data = await res.json();
+        if (data && data.current_weather) {
+          const t = Math.round(data.current_weather.temperature);
+          setTemp(`${t}°C`);
+          const code = data.current_weather.weathercode;
+          if (code === 0) setCondition('Clear ☀️');
+          else if (code >= 1 && code <= 3) setCondition('Partly Cloudy ⛅');
+          else if (code >= 51) setCondition('Rain 🌧️');
+          else setCondition('Sunny ☀️');
+        }
+      } catch (_e) {}
+    };
+    fetchWeather();
+    const interval = setInterval(fetchWeather, 600000);
+    return () => clearInterval(interval);
+  }, [config.weatherCity]);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.92)', padding: 14, justifyContent: 'center', alignItems: 'center', borderRadius: 10, borderWidth: 1, borderColor: '#4ade80' }}>
+      <Text style={{ color: '#4ade80', fontSize: 24, fontWeight: 'bold' }}>{condition}</Text>
+      <Text style={{ color: '#ffffff', fontSize: 20, fontWeight: '800', marginTop: 2 }}>{config.weatherCity || 'Delhi'}: {temp}</Text>
+    </View>
+  );
+};
+
+const DESKTOP_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
+
+const getYouTubeVideoId = (url: string): string => {
+  if (url.includes('youtu.be/')) {
+    return url.split('youtu.be/')[1]?.split('?')[0]?.split('&')[0] || '';
+  } else if (url.includes('youtube.com/watch')) {
+    const searchParams = url.split('?')[1] || '';
+    const params = new URLSearchParams(searchParams);
+    return params.get('v') || '';
+  } else if (url.includes('youtube.com/embed/')) {
+    return url.split('youtube.com/embed/')[1]?.split('?')[0] || '';
+  } else if (url.includes('youtube.com/live/')) {
+    return url.split('youtube.com/live/')[1]?.split('?')[0] || '';
+  }
+  return '';
+};
+
+const getYouTubeHtml = (videoId: string): string => {
+  return `
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+      * { margin: 0; padding: 0; overflow: hidden; background: #000; }
+      html, body, #player { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="player"></div>
+    <script>
+      var tag = document.createElement('script');
+      tag.src = "https://www.youtube.com/iframe_api";
+      var firstScriptTag = document.getElementsByTagName('script')[0];
+      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+      var player;
+      function onYouTubeIframeAPIReady() {
+        player = new YT.Player('player', {
+          videoId: '${videoId}',
+          playerVars: {
+            'autoplay': 1,
+            'controls': 1,
+            'rel': 0,
+            'showinfo': 0,
+            'loop': 1,
+            'playlist': '${videoId}',
+            'playsinline': 1,
+            'enablejsapi': 1,
+            'origin': 'https://www.youtube.com'
+          },
+          events: {
+            'onReady': function(e) {
+              e.target.playVideo();
+            }
+          }
+        });
+      }
+    </script>
+  </body>
+</html>
+  `;
+};
+
+const StreamPlayer = ({ streamUrl, resizeMode }: { streamUrl: string; resizeMode: any }) => {
+  if (!streamUrl) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0f172a', justifyContent: 'center', alignItems: 'center', padding: 12 }}>
+        <Text style={{ color: '#38bdf8', fontSize: 16, fontWeight: 'bold' }}>📺 YouTube / Website / Live Stream Feed</Text>
+        <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 4, textAlign: 'center' }}>Enter YouTube Video, Website, or Video Stream URL in Web CMS</Text>
+      </View>
+    );
+  }
+
+  const isYouTube = streamUrl.includes('youtube.com') || streamUrl.includes('youtu.be');
+  const isVideoFile = streamUrl.endsWith('.m3u8') || streamUrl.endsWith('.mp4') || streamUrl.endsWith('.ts') || streamUrl.endsWith('.mkv');
+
+  if (isYouTube) {
+    const videoId = getYouTubeVideoId(streamUrl);
+    if (videoId) {
+      const htmlContent = getYouTubeHtml(videoId);
+      return (
+        <WebView
+          source={{ html: htmlContent, baseUrl: 'https://www.youtube.com' }}
+          style={{ flex: 1, width: '100%', height: '100%', backgroundColor: '#000000' }}
+          userAgent={DESKTOP_USER_AGENT}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          allowsInlineMediaPlayback={true}
+          mediaPlaybackRequiresUserAction={false}
+          originWhitelist={['*']}
+          mixedContentMode="always"
+          androidLayerType="hardware"
+          scrollEnabled={false}
+        />
+      );
+    }
+  }
+
+  if (!isVideoFile && (streamUrl.startsWith('http://') || streamUrl.startsWith('https://'))) {
+    return (
+      <WebView
+        source={{ uri: streamUrl }}
+        style={{ flex: 1, width: '100%', height: '100%' }}
+        userAgent={DESKTOP_USER_AGENT}
+        javaScriptEnabled={true}
+        domStorageEnabled={true}
+        allowsInlineMediaPlayback={true}
+        originWhitelist={['*']}
+        mixedContentMode="always"
+        thirdPartyCookiesEnabled={true}
+        scrollEnabled={true}
+      />
+    );
+  }
+
+  return (
+    <Video
+      source={{ uri: streamUrl }}
+      style={{ width: '100%', height: '100%' }}
+      resizeMode={resizeMode || 'cover'}
+      repeat
+      controls={false}
+      muted={false}
+    />
+  );
+};
+
+const EmergencyAlertOverlay = ({ alert, onClear }: { alert: EmergencyAlertData; onClear: () => void }) => {
+  const [flash, setFlash] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!alert.active) return;
+    if (alert.sound && (RNNativeModules as any)?.CmsServerModule?.playSirenAlarm) {
+      (RNNativeModules as any).CmsServerModule.playSirenAlarm();
+    }
+    const interval = setInterval(() => setFlash((prev) => !prev), 500);
+    return () => {
+      clearInterval(interval);
+      if ((RNNativeModules as any)?.CmsServerModule?.stopSirenAlarm) {
+        (RNNativeModules as any).CmsServerModule.stopSirenAlarm();
+      }
+    };
+  }, [alert.active, alert.sound]);
+
+  if (!alert.active) return null;
+
+  const bg = alert.type === 'FIRE' ? (flash ? '#ef4444' : '#991b1b') : alert.type === 'EVACUATION' ? (flash ? '#f97316' : '#c2410c') : '#0284c7';
+
+  return (
+    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: bg, zIndex: 99999, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+      <Text style={{ color: '#ffffff', fontSize: 48, fontWeight: '900', textAlign: 'center', textTransform: 'uppercase', letterSpacing: 2 }}>
+        {alert.title || '🚨 EMERGENCY ALERT'}
+      </Text>
+      <Text style={{ color: '#ffffff', fontSize: 26, fontWeight: 'bold', textAlign: 'center', marginTop: 24, lineHeight: 36 }}>
+        {alert.message || 'PLEASE EVACUATE IMMEDIATELY!'}
+      </Text>
+      <Pressable
+        onPress={() => {
+          if ((RNNativeModules as any)?.CmsServerModule?.stopSirenAlarm) {
+            (RNNativeModules as any).CmsServerModule.stopSirenAlarm();
+          }
+          onClear();
+        }}
+        style={{ marginTop: 40, backgroundColor: '#ffffff', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 8 }}
+      >
+        <Text style={{ color: '#000000', fontSize: 16, fontWeight: 'bold' }}>CLEAR EMERGENCY ALERT</Text>
+      </Pressable>
+    </View>
+  );
 };
 
 const getRatioFlex = (ratio?: string, isFirst?: boolean) => {
@@ -316,6 +582,14 @@ export default function App() {
   const [tickerTextWidth, setTickerTextWidth] = useState<number>(0);
   const [customTextColor, setCustomTextColor] = useState<string>(config.tickerTextColor);
   const [customBgColor, setCustomBgColor] = useState<string>(config.tickerBgColor);
+  const [customLayout, setCustomLayout] = useState<CustomLayout>({ enabled: false, zones: [] });
+  const [emergencyAlert, setEmergencyAlert] = useState<EmergencyAlertData>({
+    active: false,
+    type: '',
+    title: '',
+    message: '',
+    sound: false,
+  });
 
   // License/Activation states
   const [licenseDeviceId, setLicenseDeviceId] = useState<string>('');
@@ -428,7 +702,6 @@ export default function App() {
 
   const windowDimensions = useWindowDimensions();
   const screenWidthVal = windowDimensions.width || Dimensions.get('window').width || 1280;
-
   const unitTickerText = config.tickerText ? (config.tickerText + '   ★   ') : '';
   const fontSz = config.tickerFontSize || 16;
   const singleUnitWidth = Math.max(tickerTextWidth, Math.round(unitTickerText.length * fontSz * 0.75));
@@ -511,12 +784,13 @@ export default function App() {
     }
   }, []);
 
-  // Load config from AsyncStorage
+  // Load the durable CMS config first. AsyncStorage remains a local fallback.
   const loadConfig = useCallback(async () => {
     try {
-      const savedConfig = await AsyncStorage.getItem('tvads_config');
+      const cmsModule = (RNNativeModules as any)?.CmsServerModule;
+      const savedConfig = await cmsModule?.getSavedConfig?.() || await AsyncStorage.getItem('tvads_config');
       if (savedConfig) {
-        const parsed = JSON.parse(savedConfig);
+        const parsed = typeof savedConfig === 'string' ? JSON.parse(savedConfig) : savedConfig;
         const merged = { ...DEFAULT_CONFIG, ...parsed };
         setConfig(merged);
         setTempConfig(merged);
@@ -526,6 +800,12 @@ export default function App() {
         if (merged.orientation) {
           (RNNativeModules as any)?.DeviceIdModule?.applyOrientation?.(merged.orientation);
         }
+      }
+
+      const savedLayout = await cmsModule?.getSavedLayout?.();
+      if (savedLayout) {
+        const layout = typeof savedLayout === 'string' ? JSON.parse(savedLayout) : savedLayout;
+        if (layout && Array.isArray(layout.zones)) setCustomLayout(layout);
       }
     } catch (e) {
       console.warn('Failed to load config:', e);
@@ -815,6 +1095,18 @@ export default function App() {
       } else if (event.type === 'media-updated') {
         console.log('Media uploaded or deleted via Web CMS, rescanning folders...');
         scanFolder();
+      } else if (event.type === 'emergency-alert') {
+        try {
+          const payload = typeof event.payload === 'string' ? JSON.parse(event.payload) : event.payload;
+          setEmergencyAlert({ active: true, ...payload });
+        } catch (_e) {}
+      } else if (event.type === 'clear-emergency') {
+        setEmergencyAlert({ active: false, type: '', title: '', message: '', sound: false });
+      } else if (event.type === 'layout-updated') {
+        try {
+          const layoutData = typeof event.payload === 'string' ? JSON.parse(event.payload) : event.payload;
+          setCustomLayout(layoutData);
+        } catch (_e) {}
       }
     });
     return () => {
@@ -1218,8 +1510,68 @@ export default function App() {
           </View>
         )}
 
-        {/* Dynamic Split Screen View for Sections */}
-        {sections.length > 0 && (
+        {/* Emergency Alert Flashing Overlay */}
+        <EmergencyAlertOverlay
+          alert={emergencyAlert}
+          onClear={() => setEmergencyAlert({ active: false, type: '', title: '', message: '', sound: false })}
+        />
+
+        {/* Custom Visual Drag-and-Drop Canvas Layout Mode */}
+        {customLayout.enabled && customLayout.zones && customLayout.zones.length > 0 ? (
+          <View style={{ flex: 1, width: '100%', height: '100%', position: 'relative' }}>
+            {customLayout.zones.map((z, idx) => {
+              const zoneStyle: ViewStyle = {
+                position: 'absolute',
+                left: `${z.left}%` as any,
+                top: `${z.top}%` as any,
+                width: `${z.width}%` as any,
+                height: `${z.height}%` as any,
+                zIndex: z.zIndex || 1,
+              };
+
+              if (z.type === 'media') {
+                const targetSec = sections[idx % sections.length] || sections[0];
+                return (
+                  <View key={z.id || idx} style={zoneStyle}>
+                    {targetSec ? (
+                      <SectionPlayer
+                        section={targetSec}
+                        sectionIndex={idx % sections.length}
+                        totalSections={sections.length}
+                        config={config}
+                        configOpen={configOpen}
+                        onOpenConfig={() => {
+                          setConfigOpen(true);
+                          setTempConfig(config);
+                          setFocusedIndex(0);
+                        }}
+                      />
+                    ) : null}
+                  </View>
+                );
+              } else if (z.type === 'stream') {
+                return (
+                  <View key={z.id || idx} style={zoneStyle}>
+                    <StreamPlayer streamUrl={config.liveStreamUrl || ''} resizeMode={resizeMode} />
+                  </View>
+                );
+              } else if (z.type === 'clock') {
+                return (
+                  <View key={z.id || idx} style={zoneStyle}>
+                    <ClockWidget config={config} />
+                  </View>
+                );
+              } else if (z.type === 'weather') {
+                return (
+                  <View key={z.id || idx} style={zoneStyle}>
+                    <WeatherWidget config={config} />
+                  </View>
+                );
+              }
+              return null;
+            })}
+          </View>
+        ) : sections.length > 0 ? (
           <View style={styles.splitScreenContainer}>
             {sections.length === 1 ? (
               <View style={styles.fullCell}>
@@ -1542,7 +1894,7 @@ export default function App() {
               )
             )}
           </View>
-        )}
+        ) : null}
 
         {/* Bottom Ticker (Flex layout flow below media content so no content overlap occurs) */}
         {!!config.tickerText && config.tickerPosition === 'bottom' && (

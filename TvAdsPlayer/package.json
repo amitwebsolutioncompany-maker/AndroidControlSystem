@@ -16,7 +16,8 @@
     "react-native": "0.86.0",
     "react-native-fs": "^2.20.0",
     "react-native-safe-area-context": "^5.5.2",
-    "react-native-video": "^6.19.2"
+    "react-native-video": "^6.19.2",
+    "react-native-webview": "^14.0.1"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

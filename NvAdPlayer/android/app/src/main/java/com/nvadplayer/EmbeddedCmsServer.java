@@ -30,6 +30,7 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -92,7 +93,7 @@ public class EmbeddedCmsServer extends NanoHTTPD {
         JSONObject defaultConfig = new JSONObject();
         try {
             defaultConfig.put("slideDuration", 5000);
-            defaultConfig.put("tickerText", "");
+            defaultConfig.put("tickerText", "Thank You for Choosing NextView • Your Trusted Digital Signage Partner • Smart Displays. Professional Solutions. Reliable Support. • +91 92278 96944");
             defaultConfig.put("tickerTextColor", "#FFFFFF");
             defaultConfig.put("tickerBgColor", "#000000");
             defaultConfig.put("tickerPosition", "bottom");
@@ -118,6 +119,15 @@ public class EmbeddedCmsServer extends NanoHTTPD {
         } catch (Exception e) {
             Log.e(TAG, "Error writing config.json", e);
         }
+    }
+
+    public String getSavedConfigJson() {
+        return readConfigJson().toString();
+    }
+
+    public String getSavedLayoutJson() {
+        File layoutFile = new File(getNvsignDir(), "custom_layout.json");
+        return layoutFile.exists() ? readTextFile(layoutFile) : "{\"enabled\":false,\"zones\":[]}";
     }
 
     private void deleteRecursive(File fileOrDirectory) {
@@ -167,12 +177,31 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 session.parseBody(files);
                 String postData = files.get("postData");
                 if (postData != null) {
-                    JSONObject newConfig = new JSONObject(postData);
+                    JSONObject updates = new JSONObject(postData);
+                    JSONObject newConfig = readConfigJson();
+                    Iterator<String> keys = updates.keys();
+                    while (keys.hasNext()) {
+                        String key = keys.next();
+                        newConfig.put(key, updates.get(key));
+                    }
                     writeConfigJson(newConfig);
                     emitEventToJS("config-updated", newConfig.toString());
                     emitEventToJS("media-updated", "config-save");
                     return newFixedLengthResponse(Status.OK, "application/json", "{\"success\":true}");
                 }
+            }
+
+            if (Method.POST.equals(method) && uri.equals("/api/reset-settings")) {
+                File configFile = getConfigFile();
+                if (configFile.exists()) configFile.delete();
+                File layoutFile = new File(getNvsignDir(), "custom_layout.json");
+                if (layoutFile.exists()) layoutFile.delete();
+                JSONObject defaultConfig = readConfigJson();
+                writeConfigJson(defaultConfig);
+                emitEventToJS("config-updated", defaultConfig.toString());
+                emitEventToJS("layout-updated", "{\"enabled\":false,\"zones\":[]}");
+                emitEventToJS("clear-emergency", "{}");
+                return newFixedLengthResponse(Status.OK, "application/json", "{\"success\":true}");
             }
 
             if (Method.GET.equals(method) && uri.equals("/api/media")) {
@@ -286,6 +315,46 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                     System.exit(0);
                 }).start();
                 return newFixedLengthResponse(Status.OK, "application/json", "{\"success\":true}");
+            }
+
+            if (Method.POST.equals(method) && uri.equals("/api/emergency-alert")) {
+                Map<String, String> files = new HashMap<>();
+                session.parseBody(files);
+                String postData = files.get("postData");
+                if (postData != null) {
+                    emitEventToJS("emergency-alert", postData);
+                    return newFixedLengthResponse(Status.OK, "application/json", "{\"success\":true}");
+                }
+            }
+
+            if (Method.POST.equals(method) && uri.equals("/api/clear-emergency")) {
+                emitEventToJS("clear-emergency", "{}");
+                return newFixedLengthResponse(Status.OK, "application/json", "{\"success\":true}");
+            }
+
+            if (Method.POST.equals(method) && uri.equals("/api/save-layout")) {
+                Map<String, String> files = new HashMap<>();
+                session.parseBody(files);
+                String postData = files.get("postData");
+                if (postData != null) {
+                    File layoutFile = new File(getNvsignDir(), "custom_layout.json");
+                    try (FileWriter writer = new FileWriter(layoutFile)) {
+                        writer.write(postData);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error saving custom layout", e);
+                    }
+                    emitEventToJS("layout-updated", postData);
+                    return newFixedLengthResponse(Status.OK, "application/json", "{\"success\":true}");
+                }
+            }
+
+            if (Method.GET.equals(method) && uri.equals("/api/get-layout")) {
+                File layoutFile = new File(getNvsignDir(), "custom_layout.json");
+                if (layoutFile.exists()) {
+                    String layoutContent = readTextFile(layoutFile);
+                    return newFixedLengthResponse(Status.OK, "application/json", layoutContent);
+                }
+                return newFixedLengthResponse(Status.OK, "application/json", "{\"enabled\":false,\"zones\":[]}");
             }
 
             if (Method.POST.equals(method) && uri.equals("/api/create-section")) {
@@ -526,7 +595,15 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 "    .file-name { font-size: 14px; font-weight: 600; color: var(--text-main); }\n" +
                 "    .file-size { font-size: 12px; color: var(--text-muted); }\n" +
                 "    .btn-del { background-color: #ef4444; border: none; color: #fff; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }\n" +
-                "    .alert { padding: 12px; border-radius: 8px; font-size: 14px; margin-bottom: 16px; display: none; }\n" +
+                "    .canvas-container { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 16px; }\n" +
+                "    .canvas-screen { flex: 2; min-width: 320px; aspect-ratio: 16/9; background: #000; border: 2px solid var(--accent); border-radius: 12px; position: relative; overflow: hidden; }\n" +
+                "    .canvas-controls { flex: 1; min-width: 280px; background: var(--bg-input); border: 1px solid var(--border); padding: 16px; border-radius: 12px; }\n" +
+                "    .zone-box { position: absolute; border: 2px dashed #38bdf8; background: rgba(56, 189, 248, 0.2); border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: bold; font-size: 12px; cursor: move; user-select: none; box-sizing: border-box; }\n" +
+                "    .zone-box.active { border: 2px solid #4ade80; background: rgba(74, 222, 128, 0.25); box-shadow: 0 0 10px rgba(74,222,128,0.5); }\n" +
+                "    .resize-handle { position: absolute; right: -4px; bottom: -4px; width: 12px; height: 12px; background: #4ade80; border-radius: 50%; cursor: se-resize; }\n" +
+                "    .emergency-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 16px; }\n" +
+                "    .emergency-card { background: var(--bg-input); border: 2px solid var(--border); padding: 18px; border-radius: 12px; cursor: pointer; transition: all 0.2s; }\n" +
+                "    .emergency-card:hover, .emergency-card.active { border-color: #ef4444; background: rgba(239, 68, 68, 0.15); }\n" +
                 "    .alert-success { background-color: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #4ade80; }\n" +
                 "  </style>\n" +
                 "</head>\n" +
@@ -535,6 +612,7 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 "    <div class=\"header\">\n" +
                 "      <h1>📺 NvAd Control Center</h1>\n" +
                 "      <div class=\"header-right\">\n" +
+                "        <button class=\"btn-action\" style=\"background:#dc2626; border:none; font-size:12px; padding:6px 12px; cursor:pointer;\" onclick=\"resetTvSettings()\">↺ Reset Settings</button>\n" +
                 "        <button class=\"btn-action\" style=\"background:#ea580c; border:none; font-size:12px; padding:6px 12px; cursor:pointer;\" onclick=\"restartTvApp()\">🔄 Restart TV Player</button>\n" +
                 "        <button class=\"theme-toggle-btn\" id=\"themeBtn\" onclick=\"toggleTheme()\">\n" +
                 "          <span id=\"themeIcon\">☀️</span> <span id=\"themeLabel\">Light Mode</span>\n" +
@@ -545,6 +623,9 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 "    <div class=\"tabs\">\n" +
                 "      <button class=\"tab-btn active\" onclick=\"switchTab('configTab', this)\">⚙️ Player Settings</button>\n" +
                 "      <button class=\"tab-btn\" onclick=\"switchTab('mediaTab', this)\">📁 Section Media Manager</button>\n" +
+                "      <button class=\"tab-btn\" onclick=\"switchTab('canvasTab', this)\">🎨 Visual Canvas Builder</button>\n" +
+                "      <button class=\"tab-btn\" onclick=\"switchTab('eabsTab', this)\">🚨 Emergency Alerts (EABS)</button>\n" +
+                "      <button class=\"tab-btn\" onclick=\"switchTab('widgetsTab', this)\">🌐 Live Widgets & Streams</button>\n" +
                 "    </div>\n" +
                 "    <div id=\"alertMsg\" class=\"alert alert-success\">Settings updated successfully!</div>\n" +
                 "    <!-- Config Settings Panel -->\n" +
@@ -743,20 +824,338 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 "      <h3 style=\"font-size: 16px; font-weight: 700; margin-bottom: 12px;\" id=\"secTitle\">Files in Section</h3>\n" +
                 "      <div class=\"file-list\" id=\"fileList\">Loading files...</div>\n" +
                 "    </div>\n" +
+                "    <!-- Visual Canvas Layout Builder Panel -->\n" +
+                "    <div id=\"canvasTab\" class=\"panel\">\n" +
+                "      <div class=\"sec-header\">\n" +
+                "        <h3 style=\"font-size: 16px; font-weight: 700;\">🎨 Visual Drag & Drop Canvas Layout Builder</h3>\n" +
+                "        <div style=\"display: flex; gap: 8px; flex-wrap: wrap;\">\n" +
+                "          <button class=\"btn-action\" onclick=\"addCanvasZone('media')\">📹 Add Media Zone</button>\n" +
+                "          <button class=\"btn-action\" style=\"background:#8b5cf6;\" onclick=\"addCanvasZone('stream')\">📺 Add Live Stream</button>\n" +
+                "          <button class=\"btn-action\" style=\"background:#0284c7;\" onclick=\"addCanvasZone('weather')\">☀️ Add Weather</button>\n" +
+                "          <button class=\"btn-action\" style=\"background:#d97706;\" onclick=\"addCanvasZone('clock')\">🕒 Add Clock</button>\n" +
+                "        </div>\n" +
+                "      </div>\n" +
+                "      <div style=\"margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;\">\n" +
+                "        <label style=\"font-weight:bold; font-size:14px; display:flex; align-items:center; gap:8px;\">\n" +
+                "          <input type=\"checkbox\" id=\"customLayoutEnabled\" style=\"width:18px; height:18px;\"> Enable Custom Visual Canvas Layout on TV\n" +
+                "        </label>\n" +
+                "        <div style=\"display:flex; gap:6px;\">\n" +
+                "          <button class=\"btn-action\" style=\"background:#10b981;\" onclick=\"saveCanvasLayout()\">💾 Save Visual Layout</button>\n" +
+                "        </div>\n" +
+                "      </div>\n" +
+                "      <div class=\"canvas-container\">\n" +
+                "        <div class=\"canvas-screen\" id=\"canvasScreen\"></div>\n" +
+                "        <div class=\"canvas-controls\" id=\"zonePropEditor\">\n" +
+                "          <h4 style=\"margin-bottom:12px; color:var(--accent);\">Selected Zone Properties</h4>\n" +
+                "          <p id=\"noZoneSelected\" style=\"color:var(--text-muted); font-size:13px;\">Click on any zone box inside the 16:9 canvas mockup to edit its position, size & layer.</p>\n" +
+                "          <div id=\"zoneFields\" style=\"display:none;\">\n" +
+                "            <div class=\"form-group\"><label class=\"form-label\">Zone Title / Type</label><input type=\"text\" id=\"zoneName\" class=\"form-input\" onchange=\"updateSelectedZone()\"></div>\n" +
+                "            <div class=\"form-group\"><label class=\"form-label\">Left Position (%)</label><input type=\"number\" id=\"zoneLeft\" class=\"form-input\" min=\"0\" max=\"100\" onchange=\"updateSelectedZone()\"></div>\n" +
+                "            <div class=\"form-group\"><label class=\"form-label\">Top Position (%)</label><input type=\"number\" id=\"zoneTop\" class=\"form-input\" min=\"0\" max=\"100\" onchange=\"updateSelectedZone()\"></div>\n" +
+                "            <div class=\"form-group\"><label class=\"form-label\">Width (%)</label><input type=\"number\" id=\"zoneWidth\" class=\"form-input\" min=\"5\" max=\"100\" onchange=\"updateSelectedZone()\"></div>\n" +
+                "            <div class=\"form-group\"><label class=\"form-label\">Height (%)</label><input type=\"number\" id=\"zoneHeight\" class=\"form-input\" min=\"5\" max=\"100\" onchange=\"updateSelectedZone()\"></div>\n" +
+                "            <div class=\"form-group\"><label class=\"form-label\">Layer Z-Index</label><input type=\"number\" id=\"zoneZIndex\" class=\"form-input\" min=\"1\" max=\"99\" onchange=\"updateSelectedZone()\"></div>\n" +
+                "            <button class=\"btn-danger\" style=\"width:100%; margin-top:12px;\" onclick=\"deleteSelectedZone()\">🗑️ Delete Zone</button>\n" +
+                "          </div>\n" +
+                "        </div>\n" +
+                "      </div>\n" +
+                "    </div>\n" +
+                "    <!-- Emergency Alert Broadcast System Panel -->\n" +
+                "    <div id=\"eabsTab\" class=\"panel\">\n" +
+                "      <div class=\"sec-header\">\n" +
+                "        <h3 style=\"font-size: 16px; font-weight: 700; color: #ef4444;\">🚨 Emergency Alert Broadcast System (EABS)</h3>\n" +
+                "        <button class=\"btn-action\" style=\"background:#22c55e;\" onclick=\"clearEmergencyAlert()\">✅ Clear Emergency & Resume Normal Playback</button>\n" +
+                "      </div>\n" +
+                "      <p style=\"font-size:13px; color:var(--text-muted); margin-bottom:16px;\">Trigger high-priority full-screen emergency alerts instantly across all TV displays connected to the network.</p>\n" +
+                "      <div class=\"emergency-grid\">\n" +
+                "        <div class=\"emergency-card active\" onclick=\"selectEmergencyType('FIRE', this)\">\n" +
+                "          <h3 style=\"color:#ef4444;\">🔥 Fire Emergency Alert</h3>\n" +
+                "          <p>Displays full-screen red flashing fire warning with audio siren alarm.</p>\n" +
+                "        </div>\n" +
+                "        <div class=\"emergency-card\" onclick=\"selectEmergencyType('EVACUATION', this)\">\n" +
+                "          <h3 style=\"color:#f97316;\">🚨 Security Evacuation Order</h3>\n" +
+                "          <p>Displays urgent evacuation instructions with siren alert.</p>\n" +
+                "        </div>\n" +
+                "        <div class=\"emergency-card\" onclick=\"selectEmergencyType('CUSTOM', this)\">\n" +
+                "          <h3 style=\"color:#38bdf8;\">📢 Custom Priority Announcement</h3>\n" +
+                "          <p>Displays custom broadcast banner text over video screen.</p>\n" +
+                "        </div>\n" +
+                "      </div>\n" +
+                "      <div style=\"margin-top:20px; background:var(--bg-input); padding:20px; border-radius:12px; border:1px solid var(--border);\">\n" +
+                "        <h4 style=\"margin-bottom:12px;\">Alert Broadcast Configuration</h4>\n" +
+                "        <div class=\"form-group full-width\">\n" +
+                "          <label class=\"form-label\">Emergency Announcement Text</label>\n" +
+                "          <textarea id=\"emergencyMessage\" rows=\"3\" class=\"form-input\" style=\"font-weight:bold; font-size:15px; color:#ef4444;\">🔥 FIRE EMERGENCY! PLEASE EVACUATE THE BUILDING IMMEDIATELY VIA STAIRWELL EXITS!</textarea>\n" +
+                "        </div>\n" +
+                "        <div class=\"form-group\" style=\"margin-top:12px;\">\n" +
+                "          <label class=\"form-label\">Sound Siren Alarm</label>\n" +
+                "          <select id=\"emergencySound\" class=\"form-input\">\n" +
+                "            <option value=\"true\">🔊 Play Loud Siren Sound on TV Speakers</option>\n" +
+                "            <option value=\"false\">🔇 Silent Alert Only</option>\n" +
+                "          </select>\n" +
+                "        </div>\n" +
+                "        <button class=\"btn-danger\" style=\"width:100%; margin-top:16px; padding:14px; font-size:16px; font-weight:bold;\" onclick=\"triggerEmergencyAlert()\">🚨 BROADCAST EMERGENCY ALERT TO ALL TV SCREENS NOW</button>\n" +
+                "      </div>\n" +
+                "    </div>\n" +
+                "    <!-- Live Widgets & Stream Config Panel -->\n" +
+                "    <div id=\"widgetsTab\" class=\"panel\">\n" +
+                "      <h3 style=\"font-size: 16px; font-weight: 700; margin-bottom:16px;\">🌐 Live Widgets & Stream Feed Configuration</h3>\n" +
+                "      <div class=\"config-grid\">\n" +
+                "        <div class=\"form-group\">\n" +
+                "          <label class=\"form-label\">☀️ Live Weather City</label>\n" +
+                "          <input type=\"text\" id=\"weatherCity\" class=\"form-input\" value=\"Delhi\" placeholder=\"e.g. Delhi, Mumbai, Dubai, New York\">\n" +
+                "        </div>\n" +
+                "        <div class=\"form-group\">\n" +
+                "          <label class=\"form-label\">Temperature Unit</label>\n" +
+                "          <select id=\"weatherUnit\" class=\"form-input\">\n" +
+                "            <option value=\"celsius\">°C (Celsius)</option>\n" +
+                "            <option value=\"fahrenheit\">°F (Fahrenheit)</option>\n" +
+                "          </select>\n" +
+                "        </div>\n" +
+                "        <div class=\"form-group full-width\">\n" +
+                "          <label class=\"form-label\">📺 Website, YouTube or Live Stream URL</label>\n" +
+                "          <input type=\"url\" id=\"liveStreamUrl\" class=\"form-input\" value=\"\" placeholder=\"e.g. https://example.com, YouTube link, or .m3u8 stream\">\n" +
+                "        </div>\n" +
+                "        <div class=\"form-group\">\n" +
+                "          <label class=\"form-label\">🕒 Clock Time Format</label>\n" +
+                "          <select id=\"clockFormat\" class=\"form-input\">\n" +
+                "            <option value=\"12h\">12-Hour (10:30 AM)</option>\n" +
+                "            <option value=\"24h\">24-Hour (22:30)</option>\n" +
+                "          </select>\n" +
+                "        </div>\n" +
+                "        <div class=\"form-group\">\n" +
+                "          <label class=\"form-label\">🕋 Prayer Times Calculation Location</label>\n" +
+                "          <input type=\"text\" id=\"prayerCity\" class=\"form-input\" value=\"Delhi\" placeholder=\"e.g. Delhi, Dubai, Istanbul\">\n" +
+                "        </div>\n" +
+                "        <div class=\"full-width\">\n" +
+                "          <button class=\"btn-primary\" onclick=\"saveWidgetsConfig()\">💾 Save Live Widgets & Stream Configuration</button>\n" +
+                "        </div>\n" +
+                "      </div>\n" +
+                "    </div>\n" +
                 "  </div>\n" +
                 "  <script>\n" +
                 "    let currentSection = 'section1';\n" +
-                "    let allMedia = {};\n" +
+                "    let canvasZones = [];\n" +
+                "    let selectedZoneIndex = -1;\n" +
+                "    let selectedEmergency = 'FIRE';\n" +
+                "\n" +
+                "    async function fetchLayout() {\n" +
+                "      try {\n" +
+                "        const res = await fetch('/api/get-layout');\n" +
+                "        const data = await res.json();\n" +
+                "        if (data && data.zones) {\n" +
+                "          canvasZones = data.zones;\n" +
+                "          document.getElementById('customLayoutEnabled').checked = !!data.enabled;\n" +
+                "        }\n" +
+                "      } catch (e) {}\n" +
+                "      if (!canvasZones || canvasZones.length === 0) {\n" +
+                "        canvasZones = [\n" +
+                "          { id: 'zone_1', name: 'Main Media Zone', type: 'media', left: 0, top: 0, width: 70, height: 100, zIndex: 1 },\n" +
+                "          { id: 'zone_2', name: 'Live Stream Zone', type: 'stream', left: 70, top: 0, width: 30, height: 50, zIndex: 1 },\n" +
+                "          { id: 'zone_3', name: 'Weather & Clock', type: 'weather', left: 70, top: 50, width: 30, height: 50, zIndex: 1 }\n" +
+                "        ];\n" +
+                "      }\n" +
+                "      renderCanvasMockup();\n" +
+                "    }\n" +
+                "\n" +
+                "    function addCanvasZone(type) {\n" +
+                "      const id = 'zone_' + (canvasZones.length + 1);\n" +
+                "      const name = type.toUpperCase() + ' Zone ' + (canvasZones.length + 1);\n" +
+                "      canvasZones.push({ id, name, type, left: 10, top: 10, width: 30, height: 30, zIndex: 1 });\n" +
+                "      selectedZoneIndex = canvasZones.length - 1;\n" +
+                "      renderCanvasMockup();\n" +
+                "    }\n" +
+                "\n" +
+                "    function startDragZone(e, idx) {\n" +
+                "      if (e.target && e.target.classList && e.target.classList.contains('resize-handle')) return;\n" +
+                "      e.stopPropagation();\n" +
+                "      e.preventDefault();\n" +
+                "      selectedZoneIndex = idx;\n" +
+                "      activeDragZone = canvasZones[idx];\n" +
+                "      dragStartX = e.clientX;\n" +
+                "      dragStartY = e.clientY;\n" +
+                "      initialLeft = activeDragZone.left;\n" +
+                "      initialTop = activeDragZone.top;\n" +
+                "      renderCanvasMockup();\n" +
+                "    }\n" +
+                "\n" +
+                "    function startResizeZone(e, idx) {\n" +
+                "      e.stopPropagation();\n" +
+                "      e.preventDefault();\n" +
+                "      selectedZoneIndex = idx;\n" +
+                "      activeResizeZone = canvasZones[idx];\n" +
+                "      dragStartX = e.clientX;\n" +
+                "      dragStartY = e.clientY;\n" +
+                "      initialWidth = activeResizeZone.width;\n" +
+                "      initialHeight = activeResizeZone.height;\n" +
+                "      renderCanvasMockup();\n" +
+                "    }\n" +
+                "\n" +
+                "    window.addEventListener('mousemove', function(e) {\n" +
+                "      if (!activeDragZone && !activeResizeZone) return;\n" +
+                "      const screen = document.getElementById('canvasScreen');\n" +
+                "      if (!screen) return;\n" +
+                "      const rect = screen.getBoundingClientRect();\n" +
+                "      if (!rect || rect.width === 0 || rect.height === 0) return;\n" +
+                "\n" +
+                "      if (activeDragZone) {\n" +
+                "        const deltaX = ((e.clientX - dragStartX) / rect.width) * 100;\n" +
+                "        const deltaY = ((e.clientY - dragStartY) / rect.height) * 100;\n" +
+                "        let newLeft = Math.round((initialLeft + deltaX) * 10) / 10;\n" +
+                "        let newTop = Math.round((initialTop + deltaY) * 10) / 10;\n" +
+                "        newLeft = Math.max(0, Math.min(100 - activeDragZone.width, newLeft));\n" +
+                "        newTop = Math.max(0, Math.min(100 - activeDragZone.height, newTop));\n" +
+                "        activeDragZone.left = newLeft;\n" +
+                "        activeDragZone.top = newTop;\n" +
+                "        renderCanvasMockup();\n" +
+                "      } else if (activeResizeZone) {\n" +
+                "        const deltaX = ((e.clientX - dragStartX) / rect.width) * 100;\n" +
+                "        const deltaY = ((e.clientY - dragStartY) / rect.height) * 100;\n" +
+                "        let newW = Math.round((initialWidth + deltaX) * 10) / 10;\n" +
+                "        let newH = Math.round((initialHeight + deltaY) * 10) / 10;\n" +
+                "        newW = Math.max(5, Math.min(100 - activeResizeZone.left, newW));\n" +
+                "        newH = Math.max(5, Math.min(100 - activeResizeZone.top, newH));\n" +
+                "        activeResizeZone.width = newW;\n" +
+                "        activeResizeZone.height = newH;\n" +
+                "        renderCanvasMockup();\n" +
+                "      }\n" +
+                "    });\n" +
+                "\n" +
+                "    window.addEventListener('mouseup', function() {\n" +
+                "      activeDragZone = null;\n" +
+                "      activeResizeZone = null;\n" +
+                "    });\n" +
+                "\n" +
+                "    function renderCanvasMockup() {\n" +
+                "      const screen = document.getElementById('canvasScreen');\n" +
+                "      if (!screen) return;\n" +
+                "      screen.innerHTML = canvasZones.map((z, idx) => `\n" +
+                "        <div class=\"zone-box ${idx === selectedZoneIndex ? 'active' : ''}\" data-idx=\"${idx}\" style=\"left:${z.left}%; top:${z.top}%; width:${z.width}%; height:${z.height}%; z-index:${z.zIndex};\" onmousedown=\"startDragZone(event, ${idx})\">\n" +
+                "          ${z.name}\n" +
+                "          <div class=\"resize-handle\" data-idx=\"${idx}\" title=\"Drag to resize\" onmousedown=\"startResizeZone(event, ${idx})\"></div>\n" +
+                "        </div>\n" +
+                "      `).join('');\n" +
+                "\n" +
+                "      const fields = document.getElementById('zoneFields');\n" +
+                "      const noZone = document.getElementById('noZoneSelected');\n" +
+                "      if (selectedZoneIndex >= 0 && selectedZoneIndex < canvasZones.length) {\n" +
+                "        const z = canvasZones[selectedZoneIndex];\n" +
+                "        fields.style.display = 'block';\n" +
+                "        noZone.style.display = 'none';\n" +
+                "        document.getElementById('zoneName').value = z.name || '';\n" +
+                "        document.getElementById('zoneLeft').value = z.left !== undefined ? z.left : 0;\n" +
+                "        document.getElementById('zoneTop').value = z.top !== undefined ? z.top : 0;\n" +
+                "        document.getElementById('zoneWidth').value = z.width !== undefined ? z.width : 30;\n" +
+                "        document.getElementById('zoneHeight').value = z.height !== undefined ? z.height : 30;\n" +
+                "        document.getElementById('zoneZIndex').value = z.zIndex !== undefined ? z.zIndex : 1;\n" +
+                "      } else {\n" +
+                "        fields.style.display = 'none';\n" +
+                "        noZone.style.display = 'block';\n" +
+                "      }\n" +
+                "    }\n" +
+                "\n" +
+                "    function selectCanvasZone(idx) {\n" +
+                "      selectedZoneIndex = idx;\n" +
+                "      renderCanvasMockup();\n" +
+                "    }\n" +
+                "\n" +
+                "    function updateSelectedZone() {\n" +
+                "      if (selectedZoneIndex < 0 || selectedZoneIndex >= canvasZones.length) return;\n" +
+                "      const z = canvasZones[selectedZoneIndex];\n" +
+                "      z.name = document.getElementById('zoneName').value;\n" +
+                "      z.left = parseFloat(document.getElementById('zoneLeft').value) || 0;\n" +
+                "      z.top = parseFloat(document.getElementById('zoneTop').value) || 0;\n" +
+                "      z.width = parseFloat(document.getElementById('zoneWidth').value) || 10;\n" +
+                "      z.height = parseFloat(document.getElementById('zoneHeight').value) || 10;\n" +
+                "      z.zIndex = parseInt(document.getElementById('zoneZIndex').value) || 1;\n" +
+                "      renderCanvasMockup();\n" +
+                "    }\n" +
+                "\n" +
+                "    function deleteSelectedZone() {\n" +
+                "      if (selectedZoneIndex < 0 || selectedZoneIndex >= canvasZones.length) {\n" +
+                "        alert('Please select a zone box first by clicking on it inside the 16:9 canvas!');\n" +
+                "        return;\n" +
+                "      }\n" +
+                "      canvasZones.splice(selectedZoneIndex, 1);\n" +
+                "      selectedZoneIndex = canvasZones.length > 0 ? 0 : -1;\n" +
+                "      renderCanvasMockup();\n" +
+                "    }\n" +
+                "\n" +
+                "    async function saveCanvasLayout() {\n" +
+                "      const enabled = document.getElementById('customLayoutEnabled').checked;\n" +
+                "      const payload = { enabled: enabled, zones: canvasZones };\n" +
+                "      await fetch('/api/save-layout', {\n" +
+                "        method: 'POST',\n" +
+                "        body: JSON.stringify(payload)\n" +
+                "      });\n" +
+                "      showAlert('Visual Canvas Layout saved to TV! TV will display custom zones.');\n" +
+                "    }\n" +
+                "\n" +
+                "    function selectEmergencyType(type, cardEl) {\n" +
+                "      selectedEmergency = type;\n" +
+                "      document.querySelectorAll('.emergency-card').forEach(c => c.classList.remove('active'));\n" +
+                "      if (cardEl) cardEl.classList.add('active');\n" +
+                "      const msgEl = document.getElementById('emergencyMessage');\n" +
+                "      if (type === 'FIRE') {\n" +
+                "        msgEl.value = '🔥 FIRE EMERGENCY! PLEASE EVACUATE THE BUILDING IMMEDIATELY VIA STAIRWELL EXITS!';\n" +
+                "      } else if (type === 'EVACUATION') {\n" +
+                "        msgEl.value = '🚨 SECURITY EVACUATION ORDER! PROCEED CALMLY TO NEAREST EMERGENCY ASSEMBLY POINT!';\n" +
+                "      } else {\n" +
+                "        msgEl.value = '📢 URGENT ANNOUNCEMENT: ATTENTION ALL VISITORS AND STAFF!';\n" +
+                "      }\n" +
+                "    }\n" +
+                "\n" +
+                "    async function triggerEmergencyAlert() {\n" +
+                "      const msg = document.getElementById('emergencyMessage').value;\n" +
+                "      const sound = document.getElementById('emergencySound').value === 'true';\n" +
+                "      const payload = { type: selectedEmergency, title: selectedEmergency + ' ALERT', message: msg, sound: sound };\n" +
+                "      await fetch('/api/emergency-alert', {\n" +
+                "        method: 'POST',\n" +
+                "        body: JSON.stringify(payload)\n" +
+                "      });\n" +
+                "      showAlert('🚨 EMERGENCY ALERT BROADCASTED TO ALL TV SCREENS!');\n" +
+                "    }\n" +
+                "\n" +
+                "    async function clearEmergencyAlert() {\n" +
+                "      await fetch('/api/clear-emergency', { method: 'POST' });\n" +
+                "      showAlert('✅ Emergency Alert Cleared! Normal TV playback resumed.');\n" +
+                "    }\n" +
+                "\n" +
+                "    async function saveWidgetsConfig() {\n" +
+                "      const cfg = {\n" +
+                "        weatherCity: document.getElementById('weatherCity').value,\n" +
+                "        weatherUnit: document.getElementById('weatherUnit').value,\n" +
+                "        liveStreamUrl: document.getElementById('liveStreamUrl').value.trim(),\n" +
+                "        clockFormat: document.getElementById('clockFormat').value,\n" +
+                "        prayerCity: document.getElementById('prayerCity').value\n" +
+                "      };\n" +
+                "      await fetch('/api/config', {\n" +
+                "        method: 'POST',\n" +
+                "        body: JSON.stringify(cfg)\n" +
+                "      });\n" +
+                "      showAlert('Live Widgets & Stream configuration updated on TV!');\n" +
+                "    }\n" +
+                "\n" +
                 "    async function restartTvApp() {\n" +
                 "      if (!confirm('Are you sure you want to restart the TV Player App?')) return;\n" +
                 "      showAlert('Restarting TV Player... App will reload on screen in 2 seconds.');\n" +
                 "      await fetch('/api/restart-app', { method: 'POST' });\n" +
                 "    }\n" +
+                "    async function resetTvSettings() {\n" +
+                "      if (!confirm('Reset all player settings and canvas layout? Section media files will be kept.')) return;\n" +
+                "      const res = await fetch('/api/reset-settings', { method: 'POST' });\n" +
+                "      if (!res.ok) { showAlert('Could not reset settings. Please try again.'); return; }\n" +
+                "      await fetchConfig();\n" +
+                "      await fetchLayout();\n" +
+                "      showAlert('Player settings and canvas layout reset. Section media files were kept.');\n" +
+                "    }\n" +
                 "    window.onload = function() {\n" +
                 "      initTheme();\n" +
                 "      fetchConfig();\n" +
                 "      fetchMedia();\n" +
+                "      fetchLayout();\n" +
                 "      initDragAndDrop();\n" +
+                "      initCanvasMouseEvents();\n" +
                 "    };\n" +
                 "    function initTheme() {\n" +
                 "      const savedTheme = localStorage.getItem('cms_theme') || 'dark';\n" +
@@ -858,6 +1257,11 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 "      document.getElementById('usePendrive').value = cfg.usePendrive ? 'true' : 'false';\n" +
                 "      document.getElementById('showQrCode').value = cfg.showQrCode !== false ? 'true' : 'false';\n" +
                 "      document.getElementById('kioskMode').value = cfg.kioskMode !== false ? 'true' : 'false';\n" +
+                "      document.getElementById('weatherCity').value = cfg.weatherCity || 'Delhi';\n" +
+                "      document.getElementById('weatherUnit').value = cfg.weatherUnit || 'celsius';\n" +
+                "      document.getElementById('liveStreamUrl').value = cfg.liveStreamUrl || '';\n" +
+                "      document.getElementById('clockFormat').value = cfg.clockFormat || '12h';\n" +
+                "      document.getElementById('prayerCity').value = cfg.prayerCity || 'Delhi';\n" +
                 "      const layout = cfg.layoutMode || 'auto';\n" +
                 "      document.getElementById('layoutMode').value = layout;\n" +
                 "      document.querySelectorAll('.layout-card').forEach(c => {\n" +

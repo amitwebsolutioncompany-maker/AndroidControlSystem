@@ -2,6 +2,8 @@ package com.tvadsplayer;
 
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.media.AudioManager;
+import android.media.ToneGenerator;
 import android.util.Base64;
 import android.util.Log;
 
@@ -26,6 +28,8 @@ public class CmsServerModule extends ReactContextBaseJavaModule {
     private final ReactApplicationContext reactContext;
     private EmbeddedCmsServer server;
 
+    private static ToneGenerator toneGenerator;
+
     public CmsServerModule(ReactApplicationContext reactContext) {
         super(reactContext);
         this.reactContext = reactContext;
@@ -34,6 +38,29 @@ public class CmsServerModule extends ReactContextBaseJavaModule {
     @Override
     public String getName() {
         return "CmsServerModule";
+    }
+
+    @ReactMethod
+    public void playSirenAlarm() {
+        try {
+            if (toneGenerator == null) {
+                toneGenerator = new ToneGenerator(AudioManager.STREAM_ALARM, 100);
+            }
+            toneGenerator.startTone(ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 5000);
+        } catch (Exception e) {
+            Log.e(TAG, "Error playing siren alarm", e);
+        }
+    }
+
+    @ReactMethod
+    public void stopSirenAlarm() {
+        try {
+            if (toneGenerator != null) {
+                toneGenerator.stopTone();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error stopping siren alarm", e);
+        }
     }
 
     @ReactMethod
@@ -67,6 +94,26 @@ public class CmsServerModule extends ReactContextBaseJavaModule {
             promise.resolve(true);
         } catch (Exception e) {
             promise.reject("STOP_ERROR", e.getMessage());
+        }
+    }
+
+    @ReactMethod
+    public void getSavedConfig(Promise promise) {
+        try {
+            EmbeddedCmsServer configServer = server != null ? server : new EmbeddedCmsServer(reactContext, EmbeddedCmsServer.DEFAULT_PORT);
+            promise.resolve(configServer.getSavedConfigJson());
+        } catch (Exception e) {
+            promise.reject("CONFIG_READ_ERROR", e.getMessage());
+        }
+    }
+
+    @ReactMethod
+    public void getSavedLayout(Promise promise) {
+        try {
+            EmbeddedCmsServer configServer = server != null ? server : new EmbeddedCmsServer(reactContext, EmbeddedCmsServer.DEFAULT_PORT);
+            promise.resolve(configServer.getSavedLayoutJson());
+        } catch (Exception e) {
+            promise.reject("LAYOUT_READ_ERROR", e.getMessage());
         }
     }
 
