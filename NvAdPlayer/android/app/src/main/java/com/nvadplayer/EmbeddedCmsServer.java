@@ -1,6 +1,9 @@
 package com.nvadplayer;
 
+import android.app.PendingIntent;
 import android.content.Context;
+import android.content.Intent;
+import android.os.Build;
 import android.os.Environment;
 import android.util.Log;
 
@@ -21,8 +24,10 @@ import fi.iki.elonen.NanoHTTPD.Response.Status;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -32,6 +37,17 @@ public class EmbeddedCmsServer extends NanoHTTPD {
     private static final String TAG = "EmbeddedCmsServer";
     public static final int DEFAULT_PORT = 9090;
     private final ReactApplicationContext reactContext;
+
+    private String readTextFile(File file) {
+        try (FileInputStream fis = new FileInputStream(file)) {
+            int size = fis.available();
+            byte[] buffer = new byte[size];
+            fis.read(buffer);
+            return new String(buffer, "UTF-8");
+        } catch (Exception e) {
+            return "";
+        }
+    }
 
     public EmbeddedCmsServer(ReactApplicationContext reactContext, int port) {
         super(port);
@@ -88,6 +104,7 @@ public class EmbeddedCmsServer extends NanoHTTPD {
             defaultConfig.put("layoutMode", "auto");
             defaultConfig.put("sectionRatio", "50_50");
             defaultConfig.put("showQrCode", true);
+            defaultConfig.put("kioskMode", true);
         } catch (Exception ignored) {}
         return defaultConfig;
     }
@@ -170,15 +187,45 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                             JSONArray fileArr = new JSONArray();
                             File[] list = secDir.listFiles();
                             if (list != null) {
-                                Arrays.sort(list, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
+                                // Read _order.json if present
+                                List<String> customOrder = new ArrayList<>();
+                                File orderFile = new File(secDir, "_order.json");
+                                if (orderFile.exists()) {
+                                    try {
+                                        String orderStr = readTextFile(orderFile);
+                                        JSONArray orderJson = new JSONArray(orderStr);
+                                        for (int i = 0; i < orderJson.length(); i++) {
+                                            customOrder.add(orderJson.getString(i));
+                                        }
+                                    } catch (Exception ignored) {}
+                                }
+
+                                List<File> validFiles = new ArrayList<>();
                                 for (File f : list) {
-                                    if (f.isFile() && !f.getName().startsWith(".")) {
-                                        JSONObject fObj = new JSONObject();
-                                        fObj.put("name", f.getName());
-                                        fObj.put("size", f.length());
-                                        fObj.put("path", f.getAbsolutePath());
-                                        fileArr.put(fObj);
+                                    if (f.isFile() && !f.getName().startsWith(".") && !f.getName().equalsIgnoreCase("_order.json")) {
+                                        validFiles.add(f);
                                     }
+                                }
+
+                                if (!customOrder.isEmpty()) {
+                                    validFiles.sort((a, b) -> {
+                                        int idxA = customOrder.indexOf(a.getName());
+                                        int idxB = customOrder.indexOf(b.getName());
+                                        if (idxA != -1 && idxB != -1) return Integer.compare(idxA, idxB);
+                                        if (idxA != -1) return -1;
+                                        if (idxB != -1) return 1;
+                                        return a.getName().compareToIgnoreCase(b.getName());
+                                    });
+                                } else {
+                                    validFiles.sort((a, b) -> a.getName().compareToIgnoreCase(b.getName()));
+                                }
+
+                                for (File f : validFiles) {
+                                    JSONObject fObj = new JSONObject();
+                                    fObj.put("name", f.getName());
+                                    fObj.put("size", f.length());
+                                    fObj.put("path", f.getAbsolutePath());
+                                    fileArr.put(fObj);
                                 }
                             }
                             result.put(secName, fileArr);
@@ -186,6 +233,59 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                     }
                 }
                 return newFixedLengthResponse(Status.OK, "application/json", result.toString());
+            }
+
+            if (Method.POST.equals(method) && uri.equals("/api/reorder-media")) {
+                Map<String, String> files = new HashMap<>();
+                session.parseBody(files);
+                String postData = files.get("postData");
+                if (postData != null) {
+                    JSONObject body = new JSONObject(postData);
+                    String section = body.optString("section", "section1");
+                    JSONArray fileOrder = body.optJSONArray("fileOrder");
+                    if (fileOrder != null) {
+                        File secDir = new File(getNvsignDir(), section);
+                        if (secDir.exists() && secDir.isDirectory()) {
+                            File orderFile = new File(secDir, "_order.json");
+                            try (FileWriter writer = new FileWriter(orderFile)) {
+                                writer.write(fileOrder.toString(2));
+                            }
+                            emitEventToJS("media-updated", section);
+                            return newFixedLengthResponse(Status.OK, "application/json", "{\"success\":true}");
+                        }
+                    }
+                }
+                return newFixedLengthResponse(Status.BAD_REQUEST, "application/json", "{\"error\":\"Failed to save file order\"}");
+            }
+
+            if (Method.POST.equals(method) && uri.equals("/api/restart-app")) {
+                try {
+                    Intent launchIntent = reactContext.getPackageManager().getLaunchIntentForPackage(reactContext.getPackageName());
+                    if (launchIntent != null) {
+                        launchIntent.addFlags(
+                            Intent.FLAG_ACTIVITY_NEW_TASK |
+                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP |
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        );
+                        PendingIntent pendingIntent = PendingIntent.getActivity(
+                            reactContext,
+                            9999,
+                            launchIntent,
+                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ?
+                                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE :
+                                PendingIntent.FLAG_UPDATE_CURRENT
+                        );
+                        pendingIntent.send();
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error triggering restart launch intent", e);
+                }
+                new Thread(() -> {
+                    try { Thread.sleep(500); } catch (Exception ignored) {}
+                    System.exit(0);
+                }).start();
+                return newFixedLengthResponse(Status.OK, "application/json", "{\"success\":true}");
             }
 
             if (Method.POST.equals(method) && uri.equals("/api/create-section")) {
@@ -435,6 +535,7 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 "    <div class=\"header\">\n" +
                 "      <h1>📺 NvAd Control Center</h1>\n" +
                 "      <div class=\"header-right\">\n" +
+                "        <button class=\"btn-action\" style=\"background:#ea580c; border:none; font-size:12px; padding:6px 12px; cursor:pointer;\" onclick=\"restartTvApp()\">🔄 Restart TV Player</button>\n" +
                 "        <button class=\"theme-toggle-btn\" id=\"themeBtn\" onclick=\"toggleTheme()\">\n" +
                 "          <span id=\"themeIcon\">☀️</span> <span id=\"themeLabel\">Light Mode</span>\n" +
                 "        </button>\n" +
@@ -597,6 +698,13 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 "              <option value=\"false\">HIDE (Hide QR Badge)</option>\n" +
                 "            </select>\n" +
                 "          </div>\n" +
+                "          <div class=\"form-group\">\n" +
+                "            <label class=\"form-label\">🔒 Kiosk Lock Mode (Prevent Sleep & Exit)</label>\n" +
+                "            <select id=\"kioskMode\">\n" +
+                "              <option value=\"true\">🔒 LOCKED (ON - Keep Screen Awake & Disable Exit/Back Buttons)</option>\n" +
+                "              <option value=\"false\">🔓 UNLOCKED (OFF - Allow Settings & Normal Exit)</option>\n" +
+                "            </select>\n" +
+                "          </div>\n" +
                 "          <div class=\"full-width\">\n" +
                 "            <button type=\"submit\" class=\"btn-primary\">💾 Save Settings & Update TV</button>\n" +
                 "            <div id=\"saveSuccessMsg\" style=\"display:none; margin-top:12px; padding:12px 16px; background:rgba(34,197,94,0.15); border:1px solid #22c55e; color:#4ade80; border-radius:8px; font-weight:700; text-align:center; font-size:14px;\">✅ Settings & Layout Ratio updated instantly on TV!</div>\n" +
@@ -639,6 +747,11 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 "  <script>\n" +
                 "    let currentSection = 'section1';\n" +
                 "    let allMedia = {};\n" +
+                "    async function restartTvApp() {\n" +
+                "      if (!confirm('Are you sure you want to restart the TV Player App?')) return;\n" +
+                "      showAlert('Restarting TV Player... App will reload on screen in 2 seconds.');\n" +
+                "      await fetch('/api/restart-app', { method: 'POST' });\n" +
+                "    }\n" +
                 "    window.onload = function() {\n" +
                 "      initTheme();\n" +
                 "      fetchConfig();\n" +
@@ -744,6 +857,7 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 "      document.getElementById('resizeMode').value = cfg.resizeMode || 'stretch';\n" +
                 "      document.getElementById('usePendrive').value = cfg.usePendrive ? 'true' : 'false';\n" +
                 "      document.getElementById('showQrCode').value = cfg.showQrCode !== false ? 'true' : 'false';\n" +
+                "      document.getElementById('kioskMode').value = cfg.kioskMode !== false ? 'true' : 'false';\n" +
                 "      const layout = cfg.layoutMode || 'auto';\n" +
                 "      document.getElementById('layoutMode').value = layout;\n" +
                 "      document.querySelectorAll('.layout-card').forEach(c => {\n" +
@@ -769,6 +883,7 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 "        resizeMode: document.getElementById('resizeMode').value,\n" +
                 "        usePendrive: document.getElementById('usePendrive').value === 'true',\n" +
                 "        showQrCode: document.getElementById('showQrCode').value === 'true',\n" +
+                "        kioskMode: document.getElementById('kioskMode').value === 'true',\n" +
                 "        layoutMode: document.getElementById('layoutMode').value,\n" +
                 "        sectionRatio: document.getElementById('sectionRatio').value\n" +
                 "      };\n" +
@@ -799,6 +914,42 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 "      `).join('');\n" +
                 "      document.getElementById('secTitle').innerText = 'Files in ' + currentSection.toUpperCase();\n" +
                 "    }\n" +
+                "    let draggedIndex = null;\n" +
+                "    function handleDragStart(e, idx) {\n" +
+                "      draggedIndex = idx;\n" +
+                "      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';\n" +
+                "    }\n" +
+                "    function handleDragOver(e) {\n" +
+                "      e.preventDefault();\n" +
+                "      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';\n" +
+                "    }\n" +
+                "    function handleDropFile(e, targetIdx) {\n" +
+                "      e.preventDefault();\n" +
+                "      if (draggedIndex === null || draggedIndex === targetIdx) return;\n" +
+                "      const files = allMedia[currentSection] || [];\n" +
+                "      const movedItem = files.splice(draggedIndex, 1)[0];\n" +
+                "      files.splice(targetIdx, 0, movedItem);\n" +
+                "      draggedIndex = null;\n" +
+                "      saveFileOrder(files);\n" +
+                "    }\n" +
+                "    function moveFileOrder(idx, direction) {\n" +
+                "      const files = allMedia[currentSection] || [];\n" +
+                "      const newIdx = idx + direction;\n" +
+                "      if (newIdx < 0 || newIdx >= files.length) return;\n" +
+                "      const movedItem = files.splice(idx, 1)[0];\n" +
+                "      files.splice(newIdx, 0, movedItem);\n" +
+                "      saveFileOrder(files);\n" +
+                "    }\n" +
+                "    async function saveFileOrder(files) {\n" +
+                "      allMedia[currentSection] = files;\n" +
+                "      renderFiles();\n" +
+                "      const fileNames = files.map(f => f.name);\n" +
+                "      await fetch('/api/reorder-media', {\n" +
+                "        method: 'POST',\n" +
+                "        body: JSON.stringify({ section: currentSection, fileOrder: fileNames })\n" +
+                "      });\n" +
+                "      showAlert('Play sequence updated! TV Player will play files in the new order.');\n" +
+                "    }\n" +
                 "    function renderFiles() {\n" +
                 "      const files = allMedia[currentSection] || [];\n" +
                 "      const listEl = document.getElementById('fileList');\n" +
@@ -806,16 +957,22 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 "        listEl.innerHTML = '<p style=\"color: var(--text-muted); font-size: 14px;\">No files in this section.</p>';\n" +
                 "        return;\n" +
                 "      }\n" +
-                "      listEl.innerHTML = files.map(f => `\n" +
-                "        <div class=\"file-item\">\n" +
-                "          <div class=\"file-info\">\n" +
+                "      listEl.innerHTML = files.map((f, idx) => `\n" +
+                "        <div class=\"file-item\" draggable=\"true\" data-index=\"${idx}\" ondragstart=\"handleDragStart(event, ${idx})\" ondragover=\"handleDragOver(event)\" ondrop=\"handleDropFile(event, ${idx})\" style=\"cursor:move; user-select:none;\">\n" +
+                "          <div class=\"file-info\" style=\"display:flex; align-items:center;\">\n" +
+                "            <span style=\"font-size:18px; margin-right:8px; color:var(--text-muted);\" title=\"Drag to reorder\">⋮⋮</span>\n" +
+                "            <span style=\"font-weight:bold; color:var(--accent); font-size:12px; margin-right:8px; min-width:24px;\">#${idx + 1}</span>\n" +
                 "            <span>📄</span>\n" +
-                "            <div>\n" +
+                "            <div style=\"margin-left:8px;\">\n" +
                 "              <div class=\"file-name\">${f.name}</div>\n" +
                 "              <div class=\"file-size\">${(f.size / (1024*1024)).toFixed(2)} MB</div>\n" +
                 "            </div>\n" +
                 "          </div>\n" +
-                "          <button class=\"btn-del\" onclick=\"deleteFile('${f.name}')\">🗑️ Delete File</button>\n" +
+                "          <div style=\"display:flex; gap:6px; align-items:center;\">\n" +
+                "            <button class=\"btn-action\" style=\"padding:4px 10px; font-size:13px;\" onclick=\"moveFileOrder(${idx}, -1)\" ${idx === 0 ? 'disabled style=\"opacity:0.3;\"' : ''}>⬆️</button>\n" +
+                "            <button class=\"btn-action\" style=\"padding:4px 10px; font-size:13px;\" onclick=\"moveFileOrder(${idx}, 1)\" ${idx === files.length - 1 ? 'disabled style=\"opacity:0.3;\"' : ''}>⬇️</button>\n" +
+                "            <button class=\"btn-del\" onclick=\"deleteFile('${f.name}')\">🗑️ Delete</button>\n" +
+                "          </div>\n" +
                 "        </div>\n" +
                 "      `).join('');\n" +
                 "    }\n" +

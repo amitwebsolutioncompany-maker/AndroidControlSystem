@@ -149,7 +149,7 @@ const SectionPlayer: React.FC<SectionPlayerProps> = ({
       hasTVPreferredFocus={!configOpen && sectionIndex === 0}
       style={styles.mediaWrapper}
       onPress={() => {
-        if (!configOpen) {
+        if (!configOpen && config.kioskMode === false) {
           onOpenConfig();
         }
       }}
@@ -275,7 +275,7 @@ const DEFAULT_CONFIG: AppConfig = {
   tickerFontFamily: 'sans-serif',
   usePendrive: false,
   resizeMode: 'stretch',
-  kioskMode: false,
+  kioskMode: true,
   orientation: 'horizontal',
   layoutMode: 'auto',
   sectionRatio: '50_50',
@@ -313,6 +313,7 @@ export default function App() {
   const [showUsbPopup, setShowUsbPopup] = useState<boolean>(false);
   const scrollX = useRef(new Animated.Value(0)).current;
   const tickerWidth = useRef(0);
+  const [tickerTextWidth, setTickerTextWidth] = useState<number>(0);
   const [customTextColor, setCustomTextColor] = useState<string>(config.tickerTextColor);
   const [customBgColor, setCustomBgColor] = useState<string>(config.tickerBgColor);
 
@@ -432,28 +433,30 @@ export default function App() {
 
   const windowDimensions = useWindowDimensions();
   const screenWidthVal = windowDimensions.width || Dimensions.get('window').width || 1280;
-  const [tickerTextWidth, setTickerTextWidth] = useState<number>(0);
+  const unitTickerText = config.tickerText ? (config.tickerText + '   ★   ') : '';
+  const fontSz = config.tickerFontSize || 16;
+  const singleUnitWidth = Math.max(tickerTextWidth, Math.round(unitTickerText.length * fontSz * 0.75));
+  const repeatCount = Math.max(4, Math.ceil((screenWidthVal * 3) / Math.max(50, singleUnitWidth)));
+  const fullTickerText = Array(repeatCount).fill(unitTickerText).join('');
 
   // Ticker marquee animation effect - continuous non-stop loop right to left with ZERO blank gap
   useEffect(() => {
     if (!config.tickerText || configOpen) {
+      scrollX.stopAnimation();
       scrollX.setValue(0);
       return;
     }
 
-    const fontSz = config.tickerFontSize || 16;
-    const exactW = tickerTextWidth > 0 ? tickerTextWidth : Math.max(20, config.tickerText.length * fontSz * 0.55);
-    const startX = screenWidthVal;
-    const endX = -exactW;
-    const totalDistance = startX - endX;
-    const speedPxPerMs = 0.12; // Responsive smooth marquee speed
-    const duration = Math.max(3000, Math.round(totalDistance / speedPxPerMs));
+    const totalDistance = Math.max(200, singleUnitWidth);
+    const speedPxPerMs = 0.08; // Continuous smooth TV marquee speed
+    const duration = Math.max(2000, Math.round(totalDistance / speedPxPerMs));
 
-    scrollX.setValue(startX);
+    scrollX.stopAnimation();
+    scrollX.setValue(0);
 
     const marqueeLoop = Animated.loop(
       Animated.timing(scrollX, {
-        toValue: endX,
+        toValue: -totalDistance,
         duration: duration,
         easing: Easing.linear,
         useNativeDriver: true,
@@ -464,18 +467,22 @@ export default function App() {
 
     return () => {
       marqueeLoop.stop();
+      scrollX.stopAnimation();
     };
   }, [
     config.tickerText,
     config.tickerFontSize,
     config.tickerPosition,
+    config.tickerBgColor,
+    config.tickerTextColor,
+    config.tickerFontFamily,
     config.layoutMode,
     config.sectionRatio,
     config.orientation,
     configOpen,
     scrollX,
     screenWidthVal,
-    tickerTextWidth,
+    singleUnitWidth,
   ]);
 
   // Permissions States
@@ -694,7 +701,7 @@ export default function App() {
           const sFiles = await RNFS.readDir(sDir.path);
           const list: MediaItem[] = [];
           for (const file of sFiles) {
-            if (file.isFile()) {
+            if (file.isFile() && file.name !== '_order.json') {
               const ext = '.' + file.name.split('.').pop()?.toLowerCase();
               if (IMAGE_EXTENSIONS.includes(ext)) {
                 list.push({ name: file.name, path: file.path, type: 'image' });
@@ -703,7 +710,30 @@ export default function App() {
               }
             }
           }
-          list.sort((a, b) => a.name.localeCompare(b.name));
+
+          // Custom file playback order support via _order.json
+          let customOrder: string[] = [];
+          const orderFilePath = `${sDir.path}/_order.json`;
+          if (await RNFS.exists(orderFilePath)) {
+            try {
+              const orderData = await RNFS.readFile(orderFilePath, 'utf8');
+              customOrder = JSON.parse(orderData);
+            } catch (_e) {}
+          }
+
+          if (customOrder.length > 0) {
+            list.sort((a, b) => {
+              const idxA = customOrder.indexOf(a.name);
+              const idxB = customOrder.indexOf(b.name);
+              if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+              if (idxA !== -1) return -1;
+              if (idxB !== -1) return 1;
+              return a.name.localeCompare(b.name);
+            });
+          } else {
+            list.sort((a, b) => a.name.localeCompare(b.name));
+          }
+
           sectionsList.push({
             id: sDir.name,
             title: sDir.name.toUpperCase(),
@@ -715,7 +745,7 @@ export default function App() {
         console.log('No section directories found. Reading root nvsign files as Section 1');
         const list: MediaItem[] = [];
         for (const file of entries) {
-          if (file.isFile()) {
+          if (file.isFile() && file.name !== '_order.json') {
             const ext = '.' + file.name.split('.').pop()?.toLowerCase();
             if (IMAGE_EXTENSIONS.includes(ext)) {
               list.push({ name: file.name, path: file.path, type: 'image' });
@@ -724,7 +754,29 @@ export default function App() {
             }
           }
         }
-        list.sort((a, b) => a.name.localeCompare(b.name));
+
+        let customOrder: string[] = [];
+        const orderFilePath = `${resolvedDir}/_order.json`;
+        if (await RNFS.exists(orderFilePath)) {
+          try {
+            const orderData = await RNFS.readFile(orderFilePath, 'utf8');
+            customOrder = JSON.parse(orderData);
+          } catch (_e) {}
+        }
+
+        if (customOrder.length > 0) {
+          list.sort((a, b) => {
+            const idxA = customOrder.indexOf(a.name);
+            const idxB = customOrder.indexOf(b.name);
+            if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+            if (idxA !== -1) return -1;
+            if (idxB !== -1) return 1;
+            return a.name.localeCompare(b.name);
+          });
+        } else {
+          list.sort((a, b) => a.name.localeCompare(b.name));
+        }
+
         sectionsList.push({
           id: 'section1',
           title: 'SECTION 1',
@@ -870,8 +922,8 @@ export default function App() {
           evt.eventType === 'longPressSelect' ||
           evt.eventType === 'down'
         )) {
-          // OK/Menu/Down button opens config settings
-          if (!configOpen) {
+          // OK/Menu/Down button opens config settings ONLY if kioskMode is unlocked
+          if (!configOpen && config.kioskMode === false) {
             setConfigOpen(true);
             setTempConfig(config); // Initialize tempConfig with current config
             setFocusedIndex(0);
@@ -887,16 +939,20 @@ export default function App() {
     }
   }, [configOpen, config]);
 
-  // Back button closes config menu or exits app
+  // Back button closes config menu or blocks exit if locked
   useEffect(() => {
     const backAction = () => {
-      console.log('Back pressed - configOpen:', configOpen);
+      console.log('Back pressed - configOpen:', configOpen, 'kioskMode:', config.kioskMode);
       if (configOpen) {
         setConfigOpen(false);
         setTempConfig(config); // Revert to actual config on cancel
         return true; // prevent default back press
       }
-      return false; // exit app normally
+      if (config.kioskMode !== false) {
+        // Block back press completely when Kiosk mode is locked
+        return true;
+      }
+      return false; // exit app normally if unlocked
     };
 
     const backHandler = BackHandler.addEventListener(
@@ -1143,6 +1199,7 @@ export default function App() {
             >
               <Animated.Text
                 numberOfLines={1}
+                ellipsizeMode="clip"
                 style={[
                   styles.tickerText,
                   {
@@ -1159,7 +1216,7 @@ export default function App() {
                   }
                 }}
               >
-                {config.tickerText}
+                {fullTickerText}
               </Animated.Text>
             </Animated.View>
           </View>
@@ -1507,6 +1564,7 @@ export default function App() {
             >
               <Animated.Text
                 numberOfLines={1}
+                ellipsizeMode="clip"
                 style={[
                   styles.tickerText,
                   {
@@ -1523,7 +1581,7 @@ export default function App() {
                   }
                 }}
               >
-                {config.tickerText}
+                {fullTickerText}
               </Animated.Text>
             </Animated.View>
           </View>
@@ -1550,6 +1608,7 @@ export default function App() {
             >
               <Animated.Text
                 numberOfLines={1}
+                ellipsizeMode="clip"
                 style={[
                   styles.tickerText,
                   {
@@ -1566,7 +1625,7 @@ export default function App() {
                   }
                 }}
               >
-                {config.tickerText}
+                {fullTickerText}
               </Animated.Text>
             </Animated.View>
           </View>
@@ -1909,6 +1968,57 @@ export default function App() {
                       </Text>
                     </Pressable>
                   ))}
+                </View>
+              </View>
+
+              {/* Kiosk Lock Mode Option */}
+              <View style={styles.settingSectionSingle}>
+                <Text style={styles.sectionTitle}>🔒 Kiosk Lock Mode (Prevent Sleep & Exit):</Text>
+                <View style={styles.singleColumn}>
+                  <Pressable
+                    id="kiosk-locked"
+                    focusable={true}
+                    onFocus={() => setFocusedId('kiosk-locked')}
+                    onBlur={() => setFocusedId('')}
+                    onPress={() => setTempConfig({ ...tempConfig, kioskMode: true })}
+                    style={({ pressed, focused }: any) => [
+                      styles.choiceBtnSingle,
+                      tempConfig.kioskMode !== false && styles.choiceActive,
+                      (focused || focusedId === 'kiosk-locked') && styles.btnFocused,
+                      pressed && styles.btnPressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.choiceText,
+                        tempConfig.kioskMode !== false && styles.choiceTextActive,
+                      ]}
+                    >
+                      🔒 LOCKED (ON - Keep Awake & Block Exit)
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    id="kiosk-unlocked"
+                    focusable={true}
+                    onFocus={() => setFocusedId('kiosk-unlocked')}
+                    onBlur={() => setFocusedId('')}
+                    onPress={() => setTempConfig({ ...tempConfig, kioskMode: false })}
+                    style={({ pressed, focused }: any) => [
+                      styles.choiceBtnSingle,
+                      tempConfig.kioskMode === false && styles.choiceActive,
+                      (focused || focusedId === 'kiosk-unlocked') && styles.btnFocused,
+                      pressed && styles.btnPressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.choiceText,
+                        tempConfig.kioskMode === false && styles.choiceTextActive,
+                      ]}
+                    >
+                      🔓 UNLOCKED (OFF - Allow Settings & Exit)
+                    </Text>
+                  </Pressable>
                 </View>
               </View>
 
@@ -2381,12 +2491,15 @@ const styles = StyleSheet.create({
     left: 0,
     flexDirection: 'row',
     alignItems: 'center',
+    width: 50000,
   },
   tickerText: {
     fontSize: 16,
     fontWeight: '600',
     includeFontPadding: false,
     textAlignVertical: 'center',
+    flexShrink: 0,
+    flexWrap: 'nowrap',
   },
   configDialog: {
     width: '65%',

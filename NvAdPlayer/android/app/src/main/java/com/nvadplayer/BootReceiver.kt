@@ -22,7 +22,17 @@ class BootReceiver : BroadcastReceiver() {
             action == "android.intent.action.MY_PACKAGE_REPLACED" ||
             action == "android.intent.action.PACKAGE_REPLACED") {
             
-            // Multiple retry attempts with delays to ensure app launches successfully
+            // Start Watchdog Service and launch app with retries
+            try {
+                val serviceIntent = Intent(context, KioskWatchdogService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+            } catch (e: Exception) {
+                Log.e("BootReceiver", "Error starting KioskWatchdogService on boot: ${e.message}")
+            }
             launchAppWithRetry(context, 0)
         }
     }

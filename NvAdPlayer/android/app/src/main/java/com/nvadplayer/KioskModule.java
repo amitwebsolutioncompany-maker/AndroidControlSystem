@@ -18,7 +18,7 @@ import com.facebook.react.module.annotations.ReactModule;
 @ReactModule(name = "KioskModule")
 public class KioskModule extends ReactContextBaseJavaModule {
     private static final String TAG = "KioskModule";
-    private boolean isKioskMode = false;
+    public static volatile boolean isKioskLocked = true;
 
     public KioskModule(ReactApplicationContext reactContext) {
         super(reactContext);
@@ -37,18 +37,46 @@ public class KioskModule extends ReactContextBaseJavaModule {
             if (activity != null) {
                 activity.runOnUiThread(() -> {
                     try {
-                        // Set flags to prevent home button and recent apps
                         activity.getWindow().addFlags(
                             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON |
                             WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD |
-                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
+                            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
+                            WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON
                         );
-                        
+
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            try {
+                                activity.startLockTask();
+                            } catch (Exception e) {
+                                Log.w(TAG, "startLockTask failed: " + e.getMessage());
+                            }
                             activity.setTaskDescription(new android.app.ActivityManager.TaskDescription("NvAdPlayer"));
                         }
-                        
-                        isKioskMode = true;
+
+                        View decorView = activity.getWindow().getDecorView();
+                        if (decorView != null) {
+                            decorView.setSystemUiVisibility(
+                                View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
+                                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION |
+                                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
+                                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
+                                View.SYSTEM_UI_FLAG_FULLSCREEN |
+                                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            );
+                        }
+
+                        isKioskLocked = true;
+                        try {
+                            Intent serviceIntent = new Intent(activity, KioskWatchdogService.class);
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                activity.startForegroundService(serviceIntent);
+                            } else {
+                                activity.startService(serviceIntent);
+                            }
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error starting KioskWatchdogService", e);
+                        }
                         Log.d(TAG, "Kiosk mode enabled");
                     } catch (Exception e) {
                         Log.e(TAG, "Error enabling kiosk mode", e);
@@ -67,14 +95,15 @@ public class KioskModule extends ReactContextBaseJavaModule {
             if (activity != null) {
                 activity.runOnUiThread(() -> {
                     try {
-                        // Clear kiosk mode flags
-                        activity.getWindow().clearFlags(
-                            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON |
-                            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD |
-                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
-                        );
-                        
-                        isKioskMode = false;
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            try {
+                                activity.stopLockTask();
+                            } catch (Exception e) {
+                                Log.w(TAG, "stopLockTask failed: " + e.getMessage());
+                            }
+                        }
+
+                        isKioskLocked = false;
                         Log.d(TAG, "Kiosk mode disabled");
                     } catch (Exception e) {
                         Log.e(TAG, "Error disabling kiosk mode", e);
