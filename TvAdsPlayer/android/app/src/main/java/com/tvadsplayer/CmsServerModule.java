@@ -68,7 +68,7 @@ public class CmsServerModule extends ReactContextBaseJavaModule {
         try {
             if (server == null) {
                 server = new EmbeddedCmsServer(reactContext, EmbeddedCmsServer.DEFAULT_PORT);
-                server.start(180000, false);
+                server.start(600000, false); // 10 minutes timeout for large file uploads
                 Log.d(TAG, "Embedded HTTP CMS Server started on port 9090");
             }
             String url = "http://" + getLocalIpAddress() + ":9090";

@@ -419,50 +419,67 @@ public class EmbeddedCmsServer extends NanoHTTPD {
             }
 
             if (Method.POST.equals(method) && uri.equals("/api/upload")) {
-                Map<String, String> files = new HashMap<>();
-                session.parseBody(files);
-                Map<String, List<String>> parameters = session.getParameters();
+                try {
+                    Map<String, String> files = new HashMap<>();
+                    session.parseBody(files);
+                    Map<String, List<String>> parameters = session.getParameters();
 
-                List<String> secList = parameters.get("section");
-                String section = (secList != null && !secList.isEmpty()) ? secList.get(0) : "section1";
+                    List<String> secList = parameters.get("section");
+                    String section = (secList != null && !secList.isEmpty()) ? secList.get(0) : "section1";
 
-                File secDir = new File(getNvsignDir(), section);
-                if (!secDir.exists()) {
-                    secDir.mkdirs();
-                }
-
-                List<String> fileNames = parameters.get("file");
-                String originalFileName = (fileNames != null && !fileNames.isEmpty()) ? fileNames.get(0) : "uploaded_media.mp4";
-
-                originalFileName = originalFileName.replaceAll("[^a-zA-Z0-9._-]", "_");
-
-                String tmpPath = files.get("file");
-                if (tmpPath != null) {
-                    File tmpFile = new File(tmpPath);
-                    File destFile = new File(secDir, originalFileName);
-                    
-                    if (destFile.exists()) {
-                        destFile.delete();
+                    File secDir = new File(getNvsignDir(), section);
+                    if (!secDir.exists()) {
+                        secDir.mkdirs();
                     }
 
-                    boolean moved = tmpFile.renameTo(destFile);
-                    if (!moved) {
-                        try (InputStream in = new java.io.BufferedInputStream(new FileInputStream(tmpFile), 1048576);
-                             OutputStream out = new java.io.BufferedOutputStream(new FileOutputStream(destFile), 1048576)) {
-                            byte[] buf = new byte[1048576];
-                            int len;
-                            while ((len = in.read(buf)) > 0) {
-                                out.write(buf, 0, len);
-                            }
-                            out.flush();
-                        } catch (Exception e) {
-                            Log.e(TAG, "Error saving uploaded file", e);
+                    List<String> fileNames = parameters.get("file");
+                    String originalFileName = (fileNames != null && !fileNames.isEmpty()) ? fileNames.get(0) : "uploaded_media.mp4";
+
+                    originalFileName = originalFileName.replaceAll("[^a-zA-Z0-9._-]", "_");
+
+                    String tmpPath = files.get("file");
+                    if (tmpPath != null) {
+                        File tmpFile = new File(tmpPath);
+                        File destFile = new File(secDir, originalFileName);
+                        
+                        Log.d(TAG, "Processing upload: " + originalFileName + " (" + (tmpFile.length() / (1024 * 1024)) + " MB)");
+                        
+                        if (destFile.exists()) {
+                            destFile.delete();
                         }
-                        try { tmpFile.delete(); } catch (Exception ignored) {}
-                    }
 
-                    emitEventToJS("media-updated", section);
-                    return newFixedLengthResponse(Status.OK, "application/json", "{\"success\":true,\"file\":\"" + originalFileName + "\"}");
+                        boolean moved = tmpFile.renameTo(destFile);
+                        if (!moved) {
+                            Log.d(TAG, "Rename failed, using copy method");
+                            try (InputStream in = new java.io.BufferedInputStream(new FileInputStream(tmpFile), 4194304);
+                                 OutputStream out = new java.io.BufferedOutputStream(new FileOutputStream(destFile), 4194304)) {
+                                byte[] buf = new byte[4194304];
+                                int len;
+                                long totalBytes = 0;
+                                while ((len = in.read(buf)) > 0) {
+                                    out.write(buf, 0, len);
+                                    totalBytes += len;
+                                    if (totalBytes % (100 * 1024 * 1024) == 0) {
+                                        Log.d(TAG, "Copied " + (totalBytes / (1024 * 1024)) + " MB");
+                                    }
+                                }
+                                out.flush();
+                                Log.d(TAG, "File copy complete: " + (totalBytes / (1024 * 1024)) + " MB");
+                            } catch (Exception e) {
+                                Log.e(TAG, "Error saving uploaded file", e);
+                                return newFixedLengthResponse(Status.INTERNAL_ERROR, "application/json", "{\"error\":\"File save failed: " + e.getMessage() + "\"}");
+                            }
+                            try { tmpFile.delete(); } catch (Exception ignored) {}
+                        }
+
+                        emitEventToJS("media-updated", section);
+                        return newFixedLengthResponse(Status.OK, "application/json", "{\"success\":true,\"file\":\"" + originalFileName + "\"}");
+                    } else {
+                        return newFixedLengthResponse(Status.BAD_REQUEST, "application/json", "{\"error\":\"No file data received\"}");
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error in file upload", e);
+                    return newFixedLengthResponse(Status.INTERNAL_ERROR, "application/json", "{\"error\":\"Upload failed: " + e.getMessage() + "\"}");
                 }
             }
 
@@ -605,6 +622,57 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                 "    .emergency-card { background: var(--bg-input); border: 2px solid var(--border); padding: 18px; border-radius: 12px; cursor: pointer; transition: all 0.2s; }\n" +
                 "    .emergency-card:hover, .emergency-card.active { border-color: #ef4444; background: rgba(239, 68, 68, 0.15); }\n" +
                 "    .alert-success { background-color: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #4ade80; }\n" +
+                "    @media (max-width: 768px) {\n" +
+                "      body { padding: 12px; }\n" +
+                "      .container { max-width: 100%; }\n" +
+                "      .header { flex-direction: column; align-items: flex-start; gap: 12px; }\n" +
+                "      .header-right { flex-wrap: wrap; width: 100%; }\n" +
+                "      .header h1 { font-size: 18px; }\n" +
+                "      .ip-badge { font-size: 11px; padding: 6px 10px; }\n" +
+                "      .theme-toggle-btn { font-size: 11px; padding: 6px 10px; }\n" +
+                "      .tabs { flex-wrap: wrap; gap: 8px; }\n" +
+                "      .tab-btn { font-size: 12px; padding: 10px 14px; flex: 1 1 calc(50% - 4px); min-width: 140px; }\n" +
+                "      .panel { padding: 16px; }\n" +
+                "      .config-grid { grid-template-columns: 1fr; gap: 16px; }\n" +
+                "      .layout-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }\n" +
+                "      .ratio-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }\n" +
+                "      .emergency-grid { grid-template-columns: 1fr; gap: 12px; }\n" +
+                "      .canvas-container { flex-direction: column; }\n" +
+                "      .canvas-screen { min-width: 100%; }\n" +
+                "      .canvas-controls { min-width: 100%; }\n" +
+                "      .sec-header { flex-direction: column; align-items: flex-start; }\n" +
+                "      .sec-tabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }\n" +
+                "      .sec-tab { white-space: nowrap; }\n" +
+                "      .btn-action, .btn-edit, .btn-danger { font-size: 12px; padding: 8px 12px; }\n" +
+                "      .btn-primary { font-size: 14px; padding: 12px 20px; }\n" +
+                "      .upload-box { padding: 20px; }\n" +
+                "      .upload-box p:first-child { font-size: 28px; }\n" +
+                "      .upload-box p:nth-child(2) { font-size: 14px; }\n" +
+                "      .file-item { flex-direction: column; align-items: flex-start; gap: 8px; }\n" +
+                "      .file-info { width: 100%; }\n" +
+                "      .btn-del { width: 100%; }\n" +
+                "      .form-label { font-size: 12px; }\n" +
+                "      .form-input, select, textarea { font-size: 13px; padding: 10px; }\n" +
+                "      .layout-preview { height: 60px; }\n" +
+                "      .ratio-bar { height: 30px; }\n" +
+                "    }\n" +
+                "    @media (max-width: 480px) {\n" +
+                "      body { padding: 8px; }\n" +
+                "      .header h1 { font-size: 16px; }\n" +
+                "      .tab-btn { font-size: 11px; padding: 8px 10px; flex: 1 1 100%; min-width: auto; }\n" +
+                "      .panel { padding: 12px; }\n" +
+                "      .layout-grid { grid-template-columns: 1fr 1fr; gap: 8px; }\n" +
+                "      .ratio-grid { grid-template-columns: 1fr 1fr; gap: 8px; }\n" +
+                "      .btn-action, .btn-edit, .btn-danger { font-size: 11px; padding: 6px 10px; }\n" +
+                "      .btn-primary { font-size: 13px; padding: 10px 16px; }\n" +
+                "      .upload-box { padding: 16px; }\n" +
+                "      .upload-box p:first-child { font-size: 24px; }\n" +
+                "      .upload-box p:nth-child(2) { font-size: 13px; }\n" +
+                "      .progress-box { padding: 12px; }\n" +
+                "      .layout-preview { height: 50px; }\n" +
+                "      .ratio-bar { height: 26px; }\n" +
+                "      .color-picker-swatch { width: 40px; height: 40px; }\n" +
+                "    }\n" +
                 "  </style>\n" +
                 "</head>\n" +
                 "<body>\n" +

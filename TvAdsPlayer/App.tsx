@@ -343,34 +343,65 @@ const ClockWidget = ({ config }: { config: AppConfig }) => {
 };
 
 const WeatherWidget = ({ config }: { config: AppConfig }) => {
-  const [temp, setTemp] = useState<string>('30°C');
-  const [condition, setCondition] = useState<string>('Sunny ☀️');
+  const [temp, setTemp] = useState<string>('--');
+  const [condition, setCondition] = useState<string>('Loading...');
+  const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
     const fetchWeather = async () => {
       try {
         const city = config.weatherCity || 'Delhi';
-        const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=28.61&longitude=77.20&current_weather=true`);
-        const data = await res.json();
-        if (data && data.current_weather) {
-          const t = Math.round(data.current_weather.temperature);
-          setTemp(`${t}°C`);
-          const code = data.current_weather.weathercode;
+        setLoading(true);
+        
+        // First, get coordinates from city name using Open-Meteo Geocoding API
+        const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`);
+        const geoData = await geoRes.json();
+        
+        if (!geoData.results || geoData.results.length === 0) {
+          setCondition('City not found');
+          setLoading(false);
+          return;
+        }
+        
+        const { latitude, longitude, name, country } = geoData.results[0];
+        
+        // Then fetch weather using the coordinates
+        const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true`);
+        const weatherData = await weatherRes.json();
+        
+        if (weatherData && weatherData.current_weather) {
+          const t = Math.round(weatherData.current_weather.temperature);
+          const unit = config.weatherUnit === 'fahrenheit' ? '°F' : '°C';
+          const tempInUnit = config.weatherUnit === 'fahrenheit' ? Math.round(t * 9/5 + 32) : t;
+          setTemp(`${tempInUnit}${unit}`);
+          
+          const code = weatherData.current_weather.weathercode;
           if (code === 0) setCondition('Clear ☀️');
           else if (code >= 1 && code <= 3) setCondition('Partly Cloudy ⛅');
-          else if (code >= 51) setCondition('Rain 🌧️');
-          else setCondition('Sunny ☀️');
+          else if (code >= 45 && code <= 48) setCondition('Foggy 🌫️');
+          else if (code >= 51 && code <= 67) setCondition('Rain 🌧️');
+          else if (code >= 71 && code <= 77) setCondition('Snow 🌨️');
+          else if (code >= 80 && code <= 82) setCondition('Showers 🌦️');
+          else if (code >= 95) setCondition('Thunderstorm ⛈️');
+          else setCondition('Cloudy ☁️');
+        } else {
+          setCondition('Weather unavailable');
         }
-      } catch (_e) {}
+      } catch (e) {
+        console.error('Weather fetch error:', e);
+        setCondition('Error loading weather');
+      } finally {
+        setLoading(false);
+      }
     };
     fetchWeather();
-    const interval = setInterval(fetchWeather, 600000);
+    const interval = setInterval(fetchWeather, 600000); // Refresh every 10 minutes
     return () => clearInterval(interval);
-  }, [config.weatherCity]);
+  }, [config.weatherCity, config.weatherUnit]);
 
   return (
     <View style={{ flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.92)', padding: 14, justifyContent: 'center', alignItems: 'center', borderRadius: 10, borderWidth: 1, borderColor: '#4ade80' }}>
-      <Text style={{ color: '#4ade80', fontSize: 24, fontWeight: 'bold' }}>{condition}</Text>
+      <Text style={{ color: '#4ade80', fontSize: 24, fontWeight: 'bold' }}>{loading ? 'Loading...' : condition}</Text>
       <Text style={{ color: '#ffffff', fontSize: 20, fontWeight: '800', marginTop: 2 }}>{config.weatherCity || 'Delhi'}: {temp}</Text>
     </View>
   );
