@@ -142,6 +142,181 @@ public class EmbeddedCmsServer extends NanoHTTPD {
         fileOrDirectory.delete();
     }
 
+    private Response handleStreamingUpload(IHTTPSession session) {
+        try {
+            // Get content-type and extract boundary
+            String contentType = session.getHeaders().get("content-type");
+            String boundary = null;
+            if (contentType != null && contentType.contains("boundary=")) {
+                boundary = contentType.substring(contentType.indexOf("boundary=") + 9);
+                if (boundary.contains(";")) {
+                    boundary = boundary.substring(0, boundary.indexOf(";"));
+                }
+                boundary = boundary.trim();
+            }
+            
+            if (boundary == null) {
+                Log.e(TAG, "No boundary found in content-type");
+                return newFixedLengthResponse(Status.BAD_REQUEST, "application/json", "{\"error\":\"No boundary found\"}");
+            }
+
+            // Get section from query parameters
+            Map<String, List<String>> params = session.getParameters();
+            List<String> secList = params.get("section");
+            String section = (secList != null && !secList.isEmpty()) ? secList.get(0) : "section1";
+
+            // Get filename from query parameters
+            List<String> fileNameList = params.get("filename");
+            String fileName = (fileNameList != null && !fileNameList.isEmpty()) ? fileNameList.get(0) : "uploaded_large_file.mkv";
+            fileName = fileName.replaceAll("[^a-zA-Z0-9._-]", "_");
+
+            File secDir = new File(getNvsignDir(), section);
+            if (!secDir.exists()) {
+                secDir.mkdirs();
+            }
+
+            File destFile = new File(secDir, fileName);
+            if (destFile.exists()) {
+                destFile.delete();
+            }
+
+            Log.d(TAG, "Starting multipart streaming upload to: " + destFile.getAbsolutePath() + ", boundary: " + boundary);
+
+            // Parse multipart data and extract file content
+            InputStream inputStream = session.getInputStream();
+            byte[] boundaryBytes = ("\r\n--" + boundary).getBytes("UTF-8");
+            byte[] endBoundaryBytes = ("\r\n--" + boundary + "--").getBytes("UTF-8");
+            
+            try (OutputStream out = new java.io.BufferedOutputStream(new FileOutputStream(destFile), 8388608)) {
+                // Skip first boundary
+                skipUntil(inputStream, boundaryBytes);
+                skipLine(inputStream); // Skip \r\n after boundary
+                
+                // Skip headers until empty line
+                skipHeaders(inputStream);
+                
+                // Now we're at the file data
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                long totalBytes = 0;
+                
+                while (true) {
+                    // Read chunk
+                    int pos = 0;
+                    while (pos < buffer.length) {
+                        int b = inputStream.read();
+                        if (b == -1) break;
+                        
+                        // Check for boundary
+                        if (b == '\r' && pos > 0 && buffer[pos - 1] == '\n') {
+                            // Potential boundary start
+                            byte[] check = new byte[boundaryBytes.length];
+                            check[0] = (byte) b;
+                            int checkPos = 1;
+                            while (checkPos < check.length) {
+                                int cb = inputStream.read();
+                                if (cb == -1) break;
+                                check[checkPos++] = (byte) cb;
+                            }
+                            
+                            if (java.util.Arrays.equals(check, boundaryBytes)) {
+                                // Found boundary, end of file
+                                // Check if it's the end boundary
+                                byte[] nextCheck = new byte[2];
+                                nextCheck[0] = (byte) inputStream.read();
+                                nextCheck[1] = (byte) inputStream.read();
+                                if (nextCheck[0] == '-' && nextCheck[1] == '-') {
+                                    // End boundary, we're done
+                                    break;
+                                } else {
+                                    // Not end boundary, but we should be done with file
+                                    break;
+                                }
+                            } else {
+                                // Not a boundary, write the bytes we read
+                                buffer[pos++] = (byte) b;
+                                for (int k = 1; k < checkPos; k++) {
+                                    if (pos < buffer.length) {
+                                        buffer[pos++] = check[k];
+                                    } else {
+                                        out.write(buffer, 0, pos);
+                                        out.write(check[k]);
+                                        pos = 0;
+                                        totalBytes += pos;
+                                    }
+                                }
+                            }
+                        } else {
+                            buffer[pos++] = (byte) b;
+                        }
+                    }
+                    
+                    if (pos > 0) {
+                        out.write(buffer, 0, pos);
+                        totalBytes += pos;
+                        if (totalBytes % (200 * 1024 * 1024) == 0) {
+                            Log.d(TAG, "Streamed " + (totalBytes / (1024 * 1024)) + " MB");
+                        }
+                    }
+                    
+                    // Check if we hit end boundary
+                    if (pos == 0) break;
+                }
+                
+                out.flush();
+                Log.d(TAG, "Streaming complete: " + (totalBytes / (1024 * 1024)) + " MB written");
+            }
+
+            emitEventToJS("media-updated", section);
+            return newFixedLengthResponse(Status.OK, "application/json", "{\"success\":true,\"file\":\"" + fileName + "\"}");
+        } catch (Exception e) {
+            Log.e(TAG, "Error in streaming upload", e);
+            return newFixedLengthResponse(Status.INTERNAL_ERROR, "application/json", "{\"error\":\"Streaming upload failed: " + e.getMessage() + "\"}");
+        }
+    }
+
+    private void skipUntil(InputStream in, byte[] pattern) throws Exception {
+        int matchPos = 0;
+        while (matchPos < pattern.length) {
+            int b = in.read();
+            if (b == -1) return;
+            if (b == pattern[matchPos]) {
+                matchPos++;
+            } else {
+                matchPos = 0;
+            }
+        }
+    }
+
+    private void skipLine(InputStream in) throws Exception {
+        while (true) {
+            int b = in.read();
+            if (b == -1) return;
+            if (b == '\n') return;
+        }
+    }
+
+    private void skipHeaders(InputStream in) throws Exception {
+        // Skip until empty line (\r\n\r\n)
+        int prev = -1;
+        while (true) {
+            int b = in.read();
+            if (b == -1) return;
+            if (b == '\n' && prev == '\r') {
+                // Check for another \r\n (end of headers)
+                int next1 = in.read();
+                int next2 = in.read();
+                if (next1 == '\r' && next2 == '\n') {
+                    return;
+                } else {
+                    // Not end of headers, continue
+                    prev = next2;
+                }
+            }
+            prev = b;
+        }
+    }
+
     public void emitEventToJS(String eventName, String payloadJson) {
         if (reactContext != null && reactContext.hasActiveCatalystInstance()) {
             try {
@@ -420,6 +595,19 @@ public class EmbeddedCmsServer extends NanoHTTPD {
 
             if (Method.POST.equals(method) && uri.equals("/api/upload")) {
                 try {
+                    // Check content length first
+                    String contentLengthStr = session.getHeaders().get("content-length");
+                    long contentLength = contentLengthStr != null ? Long.parseLong(contentLengthStr) : 0;
+                    
+                    Log.d(TAG, "Upload request received, content-length: " + (contentLength / (1024 * 1024)) + " MB");
+                    
+                    // For large files (>500MB), use direct streaming to avoid parseBody issues
+                    if (contentLength > 500 * 1024 * 1024) {
+                        Log.d(TAG, "Using direct streaming for large file");
+                        return handleStreamingUpload(session);
+                    }
+                    
+                    // For smaller files, use standard parseBody
                     Map<String, String> files = new HashMap<>();
                     session.parseBody(files);
                     Map<String, List<String>> parameters = session.getParameters();
