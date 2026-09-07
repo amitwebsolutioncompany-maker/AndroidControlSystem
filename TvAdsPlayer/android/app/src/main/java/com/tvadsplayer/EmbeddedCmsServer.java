@@ -357,7 +357,27 @@ public class EmbeddedCmsServer extends NanoHTTPD {
                     Iterator<String> keys = updates.keys();
                     while (keys.hasNext()) {
                         String key = keys.next();
-                        newConfig.put(key, updates.get(key));
+                        Object value = updates.get(key);
+                        
+                        // Handle ticker text period logic
+                        if (key.equals("tickerText") && value instanceof String) {
+                            String tickerText = (String) value;
+                            if (tickerText != null && !tickerText.isEmpty()) {
+                                // Trim whitespace first
+                                tickerText = tickerText.trim();
+                                // If ends with period, remove it; otherwise add it
+                                if (tickerText.endsWith(".")) {
+                                    tickerText = tickerText.substring(0, tickerText.length() - 1);
+                                } else {
+                                    tickerText = tickerText + ".";
+                                }
+                                newConfig.put(key, tickerText);
+                            } else {
+                                newConfig.put(key, value);
+                            }
+                        } else {
+                            newConfig.put(key, value);
+                        }
                     }
                     writeConfigJson(newConfig);
                     emitEventToJS("config-updated", newConfig.toString());

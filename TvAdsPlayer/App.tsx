@@ -815,6 +815,27 @@ export default function App() {
     }
   }, []);
 
+  // Refresh QR code and IP address when app comes to foreground (TV on/auto-open)
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active' && (RNNativeModules as any)?.CmsServerModule?.getIpAddress) {
+        console.log('App came to foreground, refreshing QR/IP');
+        (RNNativeModules as any).CmsServerModule.getIpAddress()
+          .then((res: { url: string; qrCode: string }) => {
+            if (res) {
+              setCmsInfo(res);
+              console.log('QR/IP refreshed:', res.url);
+            }
+          })
+          .catch((err: any) => console.warn('Failed to refresh QR/IP:', err));
+      }
+    });
+
+    return () => {
+      subscription?.remove();
+    };
+  }, []);
+
   // Load the durable CMS config first. AsyncStorage remains a local fallback.
   const loadConfig = useCallback(async () => {
     try {
