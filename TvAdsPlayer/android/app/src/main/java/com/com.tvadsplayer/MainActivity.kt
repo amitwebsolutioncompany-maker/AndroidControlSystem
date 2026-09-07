@@ -181,7 +181,10 @@ class MainActivity : ReactActivity() {
   override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
     if (KioskModule.isKioskLocked) {
       when (keyCode) {
-        KeyEvent.KEYCODE_BACK,
+        KeyEvent.KEYCODE_BACK -> {
+          event?.startTracking()
+          return true
+        }
         KeyEvent.KEYCODE_HOME,
         KeyEvent.KEYCODE_MENU,
         KeyEvent.KEYCODE_APP_SWITCH,
@@ -194,6 +197,45 @@ class MainActivity : ReactActivity() {
       }
     }
     return super.onKeyDown(keyCode, event)
+  }
+
+  override fun onKeyLongPress(keyCode: Int, event: KeyEvent?): Boolean {
+    if (keyCode == KeyEvent.KEYCODE_BACK && KioskModule.isKioskLocked) {
+      try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+          try {
+            stopLockTask()
+          } catch (e: Exception) {
+            e.printStackTrace()
+          }
+        }
+        KioskModule.isKioskLocked = false
+
+        val nvsignDir = java.io.File(Environment.getExternalStorageDirectory(), "nvsign")
+        val configFile = java.io.File(nvsignDir, "config.json")
+        if (configFile.exists()) {
+          val fis = java.io.FileInputStream(configFile)
+          val size = fis.available()
+          val buffer = ByteArray(size)
+          fis.read(buffer)
+          fis.close()
+          
+          val jsonStr = String(buffer, Charsets.UTF_8)
+          val json = org.json.JSONObject(jsonStr)
+          json.put("kioskMode", false)
+          
+          val fos = java.io.FileOutputStream(configFile)
+          fos.write(json.toString(2).toByteArray(Charsets.UTF_8))
+          fos.close()
+        }
+        
+        android.widget.Toast.makeText(this, "Kiosk Mode Unlocked", android.widget.Toast.LENGTH_LONG).show()
+      } catch (e: Exception) {
+        e.printStackTrace()
+      }
+      return true
+    }
+    return super.onKeyLongPress(keyCode, event)
   }
 
   @Suppress("DEPRECATION")
